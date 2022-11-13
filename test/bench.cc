@@ -1,101 +1,138 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <random>
-#include <algorithm>
-#include "search.h"
-#include "common.h"
 #include "aiordma.h"
+#include "common.h"
+#include "search.h"
+#include <algorithm>
+#include <random>
+#include <stdio.h>
+#include <stdlib.h>
+#include "nanobench.h"
 
-using search_func = int(const int *, int, int);
-void run(int *data, int test_num, search_func func)
+using search_func = int(const uint64_t *, int, uint64_t);
+
+void run(uint64_t *data, uint64_t test_num, search_func func)
 {
     volatile int pos;
-    auto start_time = std::chrono::steady_clock::now();
-    for (int i = 0; i < test_num; i++)
+    for (uint64_t i = 0; i < test_num; i++)
     {
         pos = func(data, test_num, i);
         if (data[pos] != i)
         {
-            log_err("pos:%d-data[pos]:%d expected:%d", pos, data[pos], i);
+            log_err("pos:%d-data[pos]:%lu expected:%lu", pos, data[pos], i);
+            return;
+        }
+    }
+}
+
+void run(uint64_t *data, uint64_t test_num, search_func func, bool warm_up)
+{
+    volatile int pos;
+    auto start_time = std::chrono::steady_clock::now();
+    for (uint64_t i = 0; i < test_num; i++)
+    {
+        pos = func(data, test_num, i);
+        if (data[pos] != i)
+        {
+            log_err("pos:%d-data[pos]:%lu expected:%lu", pos, data[pos], i);
             return;
         }
     }
     auto end_time = std::chrono::steady_clock::now();
     double duration = std::chrono::duration<double, std::nano>(end_time - start_time).count();
-    log_info("Search Latency per op :%.2lfns", duration / (1.0 * test_num));
-    log_info("Load IOPS:%.2lfMops", (1.0 * test_num * 1000) / duration);
+    if (!warm_up)
+    {
+        log_info("Search Latency per op :%.2lfns", duration / (1.0 * test_num));
+        log_info("Load IOPS:%.2lfMops", (1.0 * test_num * 1000) / duration);
+    }
 }
 
-void test_linear_search()
-{
-    auto test = [](search_func linear_search)
+void switch_other_op(){
+    //反复shuffle和sort好了
+    uint64_t data[128 * 1024];
+    uint64_t data_size =  128 * 1024;
+    for (uint64_t i = 0; i < data_size; i++)
     {
-        for (int test_num = 8; test_num <= 128 * 1024; test_num *= 2)
+        data[i] = i;
+    }
+    for(int i = 0 ; i < 16 ; i++ ){
+        std::random_device rd;
+        std::mt19937 g(rd());
+        std::shuffle(data, data + data_size, g);
+        std::sort(data, data + data_size);
+    }
+}
+
+void test_linear_search(bool warm_up,bool swith_flag)
+{
+    auto test = [=](search_func linear_search) {
+        int start_num, up_num;
+        if (warm_up)
         {
-            log_info("test_num:%d", test_num);
-            int *data = new int[test_num];
-            for (int i = 0; i < test_num; i++)
+            start_num = 8;
+            up_num = 128 * 1024;
+        }
+        else
+        {
+            start_num = 8;
+            up_num = 128 * 1024;
+            // start_num = up_num = 256;
+        }
+        for (; start_num <= up_num; start_num *= 2)
+        {
+            if (!warm_up)
+                log_info("start_num:%d", start_num);
+            uint64_t *data = new uint64_t[start_num];
+            for (uint64_t i = 0; i < start_num; i++)
             {
                 data[i] = i;
             }
             std::random_device rd;
             std::mt19937 g(rd());
-            std::shuffle(data, data + test_num, g);
-            run(data, test_num, linear_search);
+            std::shuffle(data, data + start_num, g);
+            run(data, start_num, linear_search, warm_up);
+            delete[] data;
+            if(swith_flag) switch_other_op();
+        }
+    };
+    if (!warm_up)
+        log_info("Test Linear_Search");
+    test(linear_search);
+    if (!warm_up)
+        log_info("Test Linear_Search_AVX");
+    test(linear_search_avx);
+    if (!warm_up)
+        log_info("Test Linear_Search_avx_16");
+    test(linear_search_avx_16);
+    if (!warm_up)
+        log_info("Test Linear_Search_avx_ur");
+    test(linear_search_avx_ur<1024>);
+}
+
+void nano_test_ls()
+{
+    auto test = [=](const char* desc,search_func linear_search) {
+        int start_num, up_num;
+        start_num = 8;
+        up_num = 128 * 1024;
+        // start_num = up_num = 256;
+        for (start_num = 8; start_num <= up_num; start_num *= 2)
+        {
+            uint64_t *data = new uint64_t[start_num];
+            for (uint64_t i = 0; i < start_num; i++)
+            {
+                data[i] = i;
+            }
+            std::random_device rd;
+            std::mt19937 g(rd());
+            std::shuffle(data, data + start_num, g);
+            std::string name= desc+std::to_string(start_num);
+            ankerl::nanobench::Bench().run(name.c_str(), [&] {
+                run(data, start_num, linear_search);
+            });
             delete[] data;
         }
     };
-    log_info("Test Linear_Search");
-    test(linear_search);
-    log_info("Test Linear_Search_SSE");
-    test(linear_search_sse);
-    log_info("Test Linear_Search_AVX");
-    test(linear_search_avx_8);
-}
-
-void test_bs()
-{
-    log_info("Test binsearch");
-    int test_num = 128 * 1024;
-    int *data = new int[test_num];
-    for (int i = 0; i < test_num; i++)
-    {
-        data[i] = i;
-    }
-    run(data, test_num, binsearch);
-    delete[] data;
-}
-
-void test_bsb()
-{
-    log_info("Test binsearch_branless");
-    int test_num = 128 * 1024;
-    int *data = new int[test_num];
-    for (int i = 0; i < test_num; i++)
-    {
-        data[i] = i;
-    }
-
-    for (int i = 8; i <= test_num; i = i * 2)
-    {
-        log_info("test_num:%d", i);
-        run(data, i, binary_search_branchless);
-    }
-    delete[] data;
-}
-
-void test_bss()
-{
-    log_info("Test binsearch_sse");
-    int test_num = 128 * 1024;
-    int *data = new int[test_num];
-    for (int i = 0; i < test_num; i++)
-    {
-        data[i] = i;
-    }
-
-    run(data, test_num, binsearch_sse);
-    delete[] data;
+    test("linear_search_avx",linear_search_avx);
+    test("linear_search",linear_search);
 }
 
 /// @brief
@@ -111,7 +148,8 @@ task<> rread(const char *desc, rdma_conn *conn, ibv_mr *lmr, uint64_t read_size,
     auto start_time = std::chrono::steady_clock::now();
     for (int i = 0; i < test_num; i++)
     {
-        op ? co_await conn->read(rmr.raddr, rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey) : co_await conn->write(rmr.raddr, rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey);
+        op ? co_await conn->read(rmr.raddr, rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey)
+           : co_await conn->write(rmr.raddr, rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey);
     }
     auto end_time = std::chrono::steady_clock::now();
     double duration = std::chrono::duration<double, std::micro>(end_time - start_time).count();
@@ -136,7 +174,10 @@ task<> rread(const char *desc, rdma_conn *conn, ibv_mr *lmr, uint64_t read_size,
         std::vector<rdma_future> tasks;
         for (int j = 0; j < batch_size; j++)
         {
-            op ? tasks.emplace_back(conn->read(rmr.raddr + j * read_size, rmr.rkey, ((char *)lmr->addr) + j * read_size, read_size, lmr->lkey)) : tasks.emplace_back(conn->write(rmr.raddr + j * read_size, rmr.rkey, ((char *)lmr->addr) + j * read_size, read_size, lmr->lkey));
+            op ? tasks.emplace_back(conn->read(rmr.raddr + j * read_size, rmr.rkey, ((char *)lmr->addr) + j * read_size,
+                                               read_size, lmr->lkey))
+               : tasks.emplace_back(conn->write(rmr.raddr + j * read_size, rmr.rkey,
+                                                ((char *)lmr->addr) + j * read_size, read_size, lmr->lkey));
         }
         co_await std::move(tasks.back());
         for (size_t i = 0; i < tasks.size() - 1; i++)
@@ -188,10 +229,10 @@ void test_rread()
 int main()
 {
     // Search
-    test_linear_search();
-    // test_bs();
-    // test_bsb();
-    // test_bss();
+    test_linear_search(true,false); // 第一次用来warm up ， 暂时不清楚为啥第一次性能运行这么差
+    // switch_other_op(); // 换用无关代码，看时候能warm up
+    test_linear_search(false,true);
+    // nano_test_ls();
 
     // Rdma
     // test_rread();

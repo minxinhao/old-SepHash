@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0.2)
 SET(CMAKE_CXX_COMPILER "/usr/bin/g++-11")
 project(MyIndex)
-set(CMAKE_CXX_FLAGS "-O3 -DMKL_ILP64 -msse -march=core-avx2")
+set(CMAKE_CXX_FLAGS "-O3 -DMKL_ILP64 -march=core-avx2")
 set(CMAKE_CXX_STANDARD 20)
 
 include_directories(
@@ -19,12 +19,6 @@ AUX_SOURCE_DIRECTORY ("./src" src)
 AUX_SOURCE_DIRECTORY ("./test" test)
 
 set(libs "-lmkl_intel_ilp64 -lmkl_sequential -lmkl_core -lpthread -lm -ldl -libverbs -lpthread" )
-
-add_executable(test test/test.cc ${src})
-target_link_libraries(test ${libs})
-
-add_executable(ycsb test/ycsb.cc ${src})
-target_link_libraries(ycsb ${libs})
 
 add_executable(bench test/bench.cc ${src})
 target_link_libraries(bench ${libs})
