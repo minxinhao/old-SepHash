@@ -38,7 +38,6 @@ int linear_search_avx(const uint64_t *arr, int n, uint64_t key)
 {
     const __m256i keys = _mm256_set1_epi64x(key);
     const auto rounded = 8 * (n / 8);
-    __m256i cnt = _mm256_setzero_si256();
     for (size_t i = 0; i < rounded; i += 8)
     {
 

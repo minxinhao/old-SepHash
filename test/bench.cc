@@ -53,17 +53,8 @@ void test_linear_search(bool warm_up, bool switch_flag)
 {
     auto test = [=](search_func linear_search) {
         int start_num, up_num;
-        if (warm_up)
-        {
-            start_num = 8;
-            up_num = 128 * 1024;
-        }
-        else
-        {
-            start_num = 8;
-            up_num = 128 * 1024;
-            // start_num = up_num = 256;
-        }
+        start_num = 16;
+        up_num = 128 * 1024;
         for (; start_num <= up_num; start_num *= 2)
         {
             if (!warm_up)

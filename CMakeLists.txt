@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0.2)
 SET(CMAKE_CXX_COMPILER "/usr/bin/g++-11")
 project(MyIndex)
-set(CMAKE_CXX_FLAGS "-O3 -DMKL_ILP64 -march=core-avx2")
+set(CMAKE_CXX_FLAGS "-O3 -DMKL_ILP64 -march=native")
 set(CMAKE_CXX_STANDARD 20)
 
 include_directories(
