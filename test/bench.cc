@@ -1,52 +1,17 @@
 #include "aiordma.h"
 #include "common.h"
+#include "nanobench.h"
 #include "search.h"
 #include <algorithm>
 #include <random>
 #include <stdio.h>
 #include <stdlib.h>
-#include "nanobench.h"
 
 using search_func = int(const uint64_t *, int, uint64_t);
-
-void run(uint64_t *data, uint64_t test_num, search_func func)
+void switch_other_op()
 {
-    volatile int pos;
-    for (uint64_t i = 0; i < test_num; i++)
-    {
-        pos = func(data, test_num, i);
-        if (data[pos] != i)
-        {
-            log_err("pos:%d-data[pos]:%lu expected:%lu", pos, data[pos], i);
-            return;
-        }
-    }
-}
-
-void run(uint64_t *data, uint64_t test_num, search_func func, bool warm_up)
-{
-    volatile int pos;
-    auto start_time = std::chrono::steady_clock::now();
-    for (uint64_t i = 0; i < test_num; i++)
-    {
-        pos = func(data, test_num, i);
-        if (data[pos] != i)
-        {
-            log_err("pos:%d-data[pos]:%lu expected:%lu", pos, data[pos], i);
-            return;
-        }
-    }
-    auto end_time = std::chrono::steady_clock::now();
-    double duration = std::chrono::duration<double, std::nano>(end_time - start_time).count();
-    if (!warm_up)
-    {
-        log_info("Search Latency per op :%.2lfns", duration / (1.0 * test_num));
-        log_info("Load IOPS:%.2lfMops", (1.0 * test_num * 1000) / duration);
-    }
-}
-
-void switch_other_op(){
     //反复shuffle和sort好了
+    auto start_time = std::chrono::steady_clock::now();
     uint64_t data[128 * 1024];
     uint64_t data_size =  128 * 1024;
     for (uint64_t i = 0; i < data_size; i++)
@@ -61,7 +26,30 @@ void switch_other_op(){
     }
 }
 
-void test_linear_search(bool warm_up,bool swith_flag)
+void run(uint64_t *data, uint64_t test_num, search_func func, bool warm_up, bool switch_flag)
+{
+    volatile int pos;
+    double duration = 0.0;
+    auto start_time = std::chrono::steady_clock::now();
+    for (uint64_t i = 0; i < test_num; i++)
+    {
+        pos = func(data, test_num, i);
+        if (data[pos] != i)
+        {
+            log_err("pos:%d-data[pos]:%lu expected:%lu", pos, data[pos], i);
+            return;
+        }
+    }
+    auto end_time = std::chrono::steady_clock::now();
+    duration += std::chrono::duration<double, std::nano>(end_time - start_time).count();
+    if (!warm_up)
+    {
+        log_info("Search Latency per op :%.2lfns", duration / (1.0 * test_num));
+        log_info("Load IOPS:%.2lfMops", (1.0 * test_num * 1000) / duration);
+    }
+}
+
+void test_linear_search(bool warm_up, bool switch_flag)
 {
     auto test = [=](search_func linear_search) {
         int start_num, up_num;
@@ -88,9 +76,10 @@ void test_linear_search(bool warm_up,bool swith_flag)
             std::random_device rd;
             std::mt19937 g(rd());
             std::shuffle(data, data + start_num, g);
-            run(data, start_num, linear_search, warm_up);
+            run(data, start_num, linear_search, warm_up, switch_flag);
             delete[] data;
-            if(swith_flag) switch_other_op();
+            if (switch_flag)
+                switch_other_op();
         }
     };
     if (!warm_up)
@@ -105,34 +94,6 @@ void test_linear_search(bool warm_up,bool swith_flag)
     if (!warm_up)
         log_info("Test Linear_Search_avx_ur");
     test(linear_search_avx_ur<1024>);
-}
-
-void nano_test_ls()
-{
-    auto test = [=](const char* desc,search_func linear_search) {
-        int start_num, up_num;
-        start_num = 8;
-        up_num = 128 * 1024;
-        // start_num = up_num = 256;
-        for (start_num = 8; start_num <= up_num; start_num *= 2)
-        {
-            uint64_t *data = new uint64_t[start_num];
-            for (uint64_t i = 0; i < start_num; i++)
-            {
-                data[i] = i;
-            }
-            std::random_device rd;
-            std::mt19937 g(rd());
-            std::shuffle(data, data + start_num, g);
-            std::string name= desc+std::to_string(start_num);
-            ankerl::nanobench::Bench().run(name.c_str(), [&] {
-                run(data, start_num, linear_search);
-            });
-            delete[] data;
-        }
-    };
-    test("linear_search_avx",linear_search_avx);
-    test("linear_search",linear_search);
 }
 
 /// @brief
@@ -229,10 +190,9 @@ void test_rread()
 int main()
 {
     // Search
-    test_linear_search(true,false); // 第一次用来warm up ， 暂时不清楚为啥第一次性能运行这么差
-    // switch_other_op(); // 换用无关代码，看时候能warm up
-    test_linear_search(false,true);
-    // nano_test_ls();
+    test_linear_search(true, false); // 第一次用来warm up ， 暂时不清楚为啥第一次性能运行这么差
+    // switch_other_op(); // 换用无关代码，看是否能warm up
+    test_linear_search(false, true);
 
     // Rdma
     // test_rread();

@@ -14,6 +14,8 @@
 int linear_search(const uint64_t *arr, int n, uint64_t key) ;
 int linear_search_avx (const uint64_t *arr, int n, uint64_t key) ;
 int linear_search_avx_16(const uint64_t *arr, int n, uint64_t key);
+void set_ymm();
+void clr_ymm();
 
 /// @brief unrolled edtion of avx 
 ///         对小于1024以下的部分进行直接展开

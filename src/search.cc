@@ -1,4 +1,14 @@
 #include "search.h"
+#include <cstring>
+#include <cstdio>
+#include <vector>
+#include <cmath>
+#include <climits>
+#include <immintrin.h>
+#include <cassert>
+#include <algorithm>
+#include <mutex>
+#include <avxintrin.h>
 
 int linear_search(const uint64_t *arr, int n, uint64_t key)
 {
@@ -11,7 +21,6 @@ int linear_search(const uint64_t *arr, int n, uint64_t key)
     }
     return i;
 }
-
 
 #define SHUF(i0, i1, i2, i3) (i0 + i1 * 4 + i2 * 16 + i3 * 64)
 
@@ -119,3 +128,26 @@ int linear_search_avx_16(const uint64_t *arr, int n, uint64_t key)
     return -1;
 }
 
+
+/// @brief 用来防止avx休眠
+void set_ymm(){
+    int data1 = 0;    
+    int data2 = 0xffffffff;
+    asm("vpbroadcastd %%ebx,%%ymm0\n\t"
+        "vpmovmskb %%ymm0,%%eax"         
+        :"+a"(data1)
+        :"b"(data2)
+        );    
+    // printf("data1:%x\n",data1);
+}
+
+void clr_ymm(){
+    int data1 = 0;    
+    int data2 = 0;
+    asm("vpbroadcastd %%ebx,%%ymm0\n\t"
+        "vpmovmskb %%ymm0,%%eax"         
+        :"+a"(data1)
+        :"b"(data2)
+        ); 
+    printf("data1:%x\n",data1);
+}

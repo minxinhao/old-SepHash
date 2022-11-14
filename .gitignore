@@ -1,2 +1,6 @@
-build
-out.txt
+*
+!*.sh
+!/include/*.h
+!/src/*.cc
+!/test/*.cc
+
