@@ -64,7 +64,7 @@ struct Config
             printf("err fraction of operations\n");
             exit(-1);
         }
-        print();
+        // print();
     }
 
     void print()

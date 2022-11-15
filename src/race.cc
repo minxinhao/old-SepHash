@@ -1,6 +1,7 @@
 // 因为使用协程的原因，不能嵌套太多层子函数调用
 #include "race.h"
-namespace RACE{
+namespace RACE
+{
 
 inline __attribute__((always_inline)) uint64_t get_seg_loc(uint64_t pattern, uint64_t global_depth)
 {
@@ -39,17 +40,17 @@ void PrintDir(Directory *dir)
 {
     printf("---------PrintRACE-----\n");
     printf("Global Depth:%lu\n", dir->global_depth);
+    printf("Resize Lock :%lu\n", dir->resize_lock);
     uint64_t dir_size = pow(2, dir->global_depth);
     printf("dir_size :%lu\n", dir_size);
     for (uint64_t i = 0; i < dir_size; i++)
     {
-        printf("Segment:seg_loc:%lx lock:%lu local_depth:%lu seg_ptr:%lx\n", i,
-                 dir->segs[i].split_lock, dir->segs[i].local_depth, dir->segs[i].seg_ptr);
+        printf("Segment:seg_loc:%lx lock:%lu local_depth:%lu seg_ptr:%lx\n", i, dir->segs[i].split_lock,
+               dir->segs[i].local_depth, dir->segs[i].seg_ptr);
     }
 }
 
-RACEServer::RACEServer(Config &config) : dev(nullptr, 1, config.roce_flag),
-                                         ser(dev)
+RACEServer::RACEServer(Config &config) : dev(nullptr, 1, config.roce_flag), ser(dev)
 {
     lmr = dev.reg_mr(233, config.mem_size);
     alloc.Set((char *)lmr->addr, lmr->length);
@@ -84,7 +85,8 @@ RACEServer::~RACEServer()
     rdma_free_mr(lmr);
 }
 
-RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id)
+RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, uint64_t _machine_id,
+                       uint64_t _cli_id, uint64_t _coro_id)
 {
     // id info
     machine_id = _machine_id;
@@ -100,8 +102,12 @@ RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_con
     log_info("laddr:%lx llen:%lx", (uint64_t)lmr->addr, lmr->length);
     rmr = cli->run(conn->query_remote_mr(233));
     log_info("raddr:%lx rlen:%lx rend:%lx", (uint64_t)rmr.raddr, rmr.rlen, rmr.raddr + rmr.rlen);
-    uint64_t rbuf_size = (rmr.rlen - (1ul << 30) * 5) / (config.num_machine * config.num_cli * config.num_coro); // 头部保留5GB，其他的留给client
-    ralloc.SetRemote(rmr.raddr + rmr.rlen - rbuf_size * (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id), rbuf_size, rmr.raddr, rmr.rlen);
+    uint64_t rbuf_size = (rmr.rlen - (1ul << 30) * 5) /
+                         (config.num_machine * config.num_cli * config.num_coro); // 头部保留5GB，其他的留给client
+    ralloc.SetRemote(
+        rmr.raddr + rmr.rlen -
+            rbuf_size * (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id),
+        rbuf_size, rmr.raddr, rmr.rlen);
 
     // sync dir
     dir = (Directory *)alloc.alloc(sizeof(Directory));
@@ -109,18 +115,20 @@ RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_con
     cli->run(sync_dir());
 }
 
-RACEClient::~RACEClient(){
+RACEClient::~RACEClient()
+{
     perf.Print();
 }
 
-task<> RACEClient::reset_remote(){
+task<> RACEClient::reset_remote()
+{
     //模拟远端分配器信息
     Alloc server_alloc;
     server_alloc.Set((char *)rmr.raddr, rmr.rlen);
     server_alloc.alloc(sizeof(Directory));
 
     //重置远端segment
-    memset(dir,0,sizeof(Directory));
+    memset(dir, 0, sizeof(Directory));
     dir->global_depth = INIT_DEPTH;
     dir->resize_lock = 0;
     dir->start_cnt = 0;
@@ -153,7 +161,8 @@ task<> RACEClient::start(uint64_t total)
     // log_info("Start_cnt:%lu", *start_cnt);
     while ((*start_cnt) < total)
     {
-        co_await conn->read(rmr.raddr + sizeof(Directory) - sizeof(uint64_t), rmr.rkey, start_cnt, sizeof(uint64_t), lmr->lkey);
+        co_await conn->read(rmr.raddr + sizeof(Directory) - sizeof(uint64_t), rmr.rkey, start_cnt, sizeof(uint64_t),
+                            lmr->lkey);
     }
 }
 
@@ -164,7 +173,8 @@ task<> RACEClient::stop()
     // log_info("Start_cnt:%lu", *start_cnt);
     while ((*start_cnt) != 0)
     {
-        co_await conn->read(rmr.raddr + sizeof(Directory) - sizeof(uint64_t), rmr.rkey, start_cnt, sizeof(uint64_t), lmr->lkey);
+        co_await conn->read(rmr.raddr + sizeof(Directory) - sizeof(uint64_t), rmr.rkey, start_cnt, sizeof(uint64_t),
+                            lmr->lkey);
     }
 }
 
@@ -181,13 +191,13 @@ task<> RACEClient::insert(Slice *key, Slice *value)
     auto wkv = conn->write(kvblock_ptr, rmr.rkey, kv_block, kvblock_len, lmr->lkey);
     uint64_t retry_cnt = 0;
 Retry:
-    alloc.ReSet(sizeof(Directory)+kvblock_len);
+    alloc.ReSet(sizeof(Directory) + kvblock_len);
     perf.StartPerf();
     retry_cnt++;
     // Read Segment Ptr From CCEH_Cache
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
     uintptr_t segptr = dir->segs[segloc].seg_ptr;
-    
+
     // Compute two bucket location
     uint64_t bucidx_1, bucidx_2; // calculate bucket idx for each key
     uintptr_t bucptr_1, bucptr_2;
@@ -226,18 +236,6 @@ Retry:
 
     if (slot_ptr == 0ul)
     {
-        // log_info("[%lu:%lu]Insert:%lu %s Split", cli_id, coro_id, *(uint64_t *)key->data, buc->local_depth == dir->global_depth ? "global" : "local");
-        // if(retry_cnt%1000==0){
-        //     log_err("[%lu:%lu]Split for :%lo with local_depth:%d global_depth:%ld segloc:%lu",cli_id,coro_id,*(uint64_t*)key->data,buc->local_depth , dir->global_depth,segloc);
-        // }
-        if (retry_cnt > 20000)
-        {
-            log_err("[%lu:%lu]Too much Split for Insert:%lo with local_depth:%d global_depth:%ld",cli_id,coro_id,*(uint64_t*)key->data,buc->local_depth , dir->global_depth);
-            co_await sync_dir();
-            PrintDir(dir);
-            exit(-1);
-            co_return;
-        }
         co_await Split(segloc, segptr, buc->local_depth, buc->local_depth == dir->global_depth);
         goto Retry;
     }
@@ -275,11 +273,10 @@ Retry:
             if (buc->slots[i].fp == tmp->fp && buc->slots[i].len == tmp->len && buc->slots[i].offset != tmp->offset)
             {
                 char *tmp_key = (char *)alloc.alloc(buc->slots[i].len);
-                co_await conn->read(ralloc.ptr(buc->slots[i].offset), rmr.rkey, tmp_key,
-                                    buc->slots[i].len, lmr->lkey);
+                co_await conn->read(ralloc.ptr(buc->slots[i].offset), rmr.rkey, tmp_key, buc->slots[i].len, lmr->lkey);
                 if (memcmp(key->data, tmp_key + sizeof(uint64_t) * 2, key->len) == 0)
                 {
-                    log_err("[%lu:%lu]Duplicate-key :%lu",cli_id, coro_id, *(uint64_t *)key->data);
+                    log_err("[%lu:%lu]Duplicate-key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
                     co_await conn->cas_n(buc_ptr + sizeof(uint64_t) * (i + 1), rmr.rkey, *(uint64_t *)tmp, 0);
                 }
             }
@@ -302,7 +299,8 @@ Retry:
 task<> RACEClient::sync_dir()
 {
     co_await conn->read(rmr.raddr + sizeof(uint64_t), rmr.rkey, &dir->global_depth, sizeof(uint64_t), lmr->lkey);
-    co_await conn->read(rmr.raddr + sizeof(uint64_t) * 2, rmr.rkey, dir->segs, (1 << dir->global_depth) * sizeof(DirEntry), lmr->lkey);
+    co_await conn->read(rmr.raddr + sizeof(uint64_t) * 2, rmr.rkey, dir->segs,
+                        (1 << dir->global_depth) * sizeof(DirEntry), lmr->lkey);
 }
 
 bool RACEClient::FindLessBucket(Bucket *buc1, Bucket *buc2)
@@ -387,8 +385,8 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     }
 
     DirEntry *remote_entry = (DirEntry *)alloc.alloc(sizeof(DirEntry));
-    co_await conn->read(rmr.raddr + 2 * sizeof(uint64_t) + seg_loc * sizeof(DirEntry),
-                        rmr.rkey, remote_entry, sizeof(DirEntry), lmr->lkey);
+    co_await conn->read(rmr.raddr + 2 * sizeof(uint64_t) + seg_loc * sizeof(DirEntry), rmr.rkey, remote_entry,
+                        sizeof(DirEntry), lmr->lkey);
     if (remote_entry->local_depth != dir->segs[seg_loc].local_depth)
     {
         co_await UnlockDir();
@@ -404,7 +402,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
         co_return 1;
     }
     perf.AddPerf("GetLock");
-    
+
     perf.AddCnt("SplitCnt");
     // Allocate New Seg and Init header && write to server
     perf.StartPerf();
@@ -430,21 +428,25 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
         // Update Old_seg depth
         dir->segs[seg_loc].split_lock = 1;
         dir->segs[seg_loc].local_depth = local_depth + 1;
-        co_await conn->write(rmr.raddr + 2 * sizeof(uint64_t) + seg_loc * sizeof(DirEntry),
-                             rmr.rkey, &dir->segs[seg_loc], sizeof(DirEntry), lmr->lkey);
+        co_await conn->write(rmr.raddr + 2 * sizeof(uint64_t) + seg_loc * sizeof(DirEntry), rmr.rkey,
+                             &dir->segs[seg_loc], sizeof(DirEntry), lmr->lkey);
 
         // Extend Dir
+        // 这里可能会把前部分正在执行local_split的dir entry，移动到后半部分，使得其split_lock在不知情的情况下被设置为1
+        // 仔细思考的话这样是必须得，因为后续新生成的segment会认为自己是一组独立的segment(根据设置的local__depth)
+        // (好像也不会再出现额外的split了，指针指向的内容是一样)
+        // 所以记得再把这部分隐藏的数据修改为0就行
+        // 这部分大小应该不超过2-3吧，只能根据经验来设置了
         uint64_t dir_size = 1 << dir->global_depth;
-        memcpy(dir->segs + dir_size, dir->segs, dir_size * sizeof(DirEntry));
+        memcpy(dir->segs + dir_size, dir->segs, dir_size * sizeof(DirEntry)); 
         dir->segs[new_seg_loc].local_depth = local_depth + 1;
         dir->segs[new_seg_loc].split_lock = 1;
         dir->segs[new_seg_loc].seg_ptr = new_seg_ptr;
-        co_await conn->write(rmr.raddr + 2 * sizeof(uint64_t) + dir_size * sizeof(DirEntry),
-                             rmr.rkey, dir->segs + dir_size, dir_size * sizeof(DirEntry), lmr->lkey);
+        co_await conn->write(rmr.raddr + 2 * sizeof(uint64_t) + dir_size * sizeof(DirEntry), rmr.rkey,
+                             dir->segs + dir_size, dir_size * sizeof(DirEntry), lmr->lkey);
         // Update Global Depthx
         dir->global_depth++;
-        co_await conn->write(rmr.raddr + sizeof(uint64_t),
-                             rmr.rkey, &dir->global_depth, sizeof(uint64_t), lmr->lkey);
+        co_await conn->write(rmr.raddr + sizeof(uint64_t), rmr.rkey, &dir->global_depth, sizeof(uint64_t), lmr->lkey);
     }
     else
     {
@@ -482,17 +484,16 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     if (global_flag)
     {
         dir->segs[seg_loc].split_lock = 0;
-        co_await conn->write(rmr.raddr + 2 * sizeof(uint64_t) + seg_loc * sizeof(DirEntry),
-                             rmr.rkey, &(dir->segs[seg_loc].split_lock), sizeof(uint64_t), lmr->lkey);
+        co_await conn->write(rmr.raddr + 2 * sizeof(uint64_t) + seg_loc * sizeof(DirEntry), rmr.rkey,
+                             &(dir->segs[seg_loc].split_lock), sizeof(uint64_t), lmr->lkey);
         dir->segs[new_seg_loc].split_lock = 0;
-        co_await conn->write(rmr.raddr + 2 * sizeof(uint64_t) + new_seg_loc * sizeof(DirEntry),
-                             rmr.rkey, &(dir->segs[new_seg_loc].split_lock), sizeof(uint64_t), lmr->lkey);
+        co_await conn->write(rmr.raddr + 2 * sizeof(uint64_t) + new_seg_loc * sizeof(DirEntry), rmr.rkey,
+                             &(dir->segs[new_seg_loc].split_lock), sizeof(uint64_t), lmr->lkey);
     }
     else
     {
-        uint64_t stride = (1llu) << (dir->global_depth - local_depth);
+        uint64_t stride = (1llu) << (dir->global_depth - local_depth + 2); // 这里增加2，是为了给隐式置为1的部分entry解锁
         uint64_t cur_seg_loc;
-        // log_info("global_dep:%lu local_depth:%lu stride:%lu",dir->global_depth,local_depth,stride);
         for (uint64_t i = 0; i < stride; i++)
         {
             cur_seg_loc = (i << local_depth) | first_seg_loc;
@@ -501,7 +502,6 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
                                  &(dir->segs[cur_seg_loc].split_lock), sizeof(uint64_t), lmr->lkey);
         }
     }
-    
     co_await UnlockDir();
     perf.AddPerf("FreeLock");
 
@@ -520,7 +520,6 @@ task<> RACEClient::MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment 
         buc_ptr = old_seg_ptr + i * sizeof(Bucket);
         cur_buc = &seg->buckets[i];
         co_await conn->read(buc_ptr, rmr.rkey, cur_buc, sizeof(Bucket), lmr->lkey);
-        
 
         // Update local_depth&suffix
         cur_buc->local_depth = new_seg->buckets[0].local_depth;
@@ -533,8 +532,8 @@ task<> RACEClient::MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment 
                 continue;
             perf.StartPerf();
             KVBlock *kv_block = (KVBlock *)alloc.alloc(cur_buc->slots[slot_idx].len);
-            co_await conn->read(ralloc.ptr(cur_buc->slots[slot_idx].offset), rmr.rkey,
-                                kv_block, cur_buc->slots[slot_idx].len, lmr->lkey);
+            co_await conn->read(ralloc.ptr(cur_buc->slots[slot_idx].offset), rmr.rkey, kv_block,
+                                cur_buc->slots[slot_idx].len, lmr->lkey);
             perf.AddPerf("ReadKv");
 
             perf.StartPerf();
@@ -555,7 +554,10 @@ task<> RACEClient::MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment 
                 uint64_t over_buc_ptr2 = get_over_ptr(bucidx_2, bucptr_2);
 
                 // 依次尝试Bucket 1，OverBuc 1，Bucket 2，OverBuc 2
-                if (co_await SetSlot(main_buc_ptr1, *(uint64_t *)(&cur_buc->slots[slot_idx])) && co_await SetSlot(over_buc_ptr1, *(uint64_t *)(&cur_buc->slots[slot_idx])) && co_await SetSlot(main_buc_ptr2, *(uint64_t *)(&cur_buc->slots[slot_idx])) && co_await SetSlot(over_buc_ptr2, *(uint64_t *)(&cur_buc->slots[slot_idx])))
+                if (co_await SetSlot(main_buc_ptr1, *(uint64_t *)(&cur_buc->slots[slot_idx])) &&
+                    co_await SetSlot(over_buc_ptr1, *(uint64_t *)(&cur_buc->slots[slot_idx])) &&
+                    co_await SetSlot(main_buc_ptr2, *(uint64_t *)(&cur_buc->slots[slot_idx])) &&
+                    co_await SetSlot(over_buc_ptr2, *(uint64_t *)(&cur_buc->slots[slot_idx])))
                 {
                     // log_err("Fail to move data");
                     continue;
@@ -564,8 +566,7 @@ task<> RACEClient::MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment 
                 // CAS slot in old seg to zero
                 //  assert((buc_ptr+sizeof(uint64_t)*(slot_idx+1))%8 == 0);
                 uint64_t old_slot = *(uint64_t *)(&cur_buc->slots[slot_idx]);
-                co_await conn->cas(buc_ptr + sizeof(uint64_t) * (slot_idx + 1),
-                                   rmr.rkey, old_slot, 0);
+                co_await conn->cas(buc_ptr + sizeof(uint64_t) * (slot_idx + 1), rmr.rkey, old_slot, 0);
                 if (old_slot != *(uint64_t *)(&cur_buc->slots[slot_idx]))
                 {
                     //也不影响，只要是这里被的旧slot被删除了就行
@@ -612,13 +613,7 @@ task<> RACEClient::UnlockDir()
 {
     // Set global split bit
     // assert((connector.get_remote_addr())%8 == 0);
-    while (true)
-    {
-        if (co_await conn->cas_n(rmr.raddr, rmr.rkey, 1, 0))
-        {
-            break;
-        }
-    }
+    co_await conn->cas_n(rmr.raddr, rmr.rkey, 1, 0);
 }
 
-}//NAMESPACE RACE
+} // NAMESPACE RACE

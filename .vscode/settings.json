@@ -68,6 +68,8 @@
         "deque": "cpp",
         "map": "cpp",
         "iostream": "cpp",
-        "sstream": "cpp"
+        "sstream": "cpp",
+        "ranges": "cpp",
+        "span": "cpp"
     }
 }
