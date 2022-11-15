@@ -60,7 +60,7 @@ struct Config
         read_frac = cmd_parser.get<double>("read_frac");
         update_frac = cmd_parser.get<double>("update_frac");
 
-        if(insert_frac + update_frac + read_frac <= 1.0){
+        if(insert_frac + update_frac + read_frac > 1.0){
             printf("err fraction of operations\n");
             exit(-1);
         }

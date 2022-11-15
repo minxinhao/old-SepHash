@@ -37,13 +37,13 @@ inline __attribute__((always_inline)) bool check_suffix(uint64_t suffix, uint64_
 
 void PrintDir(Directory *dir)
 {
-    log_info("---------PrintRACE-----");
-    log_info("Global Depth:%lu", dir->global_depth);
+    printf("---------PrintRACE-----\n");
+    printf("Global Depth:%lu\n", dir->global_depth);
     uint64_t dir_size = pow(2, dir->global_depth);
-    log_info("dir_size :%lu", dir_size);
+    printf("dir_size :%lu\n", dir_size);
     for (uint64_t i = 0; i < dir_size; i++)
     {
-        log_info("Segment:seg_loc:%lx lock:%lu local_depth:%lu seg_ptr:%lx", i,
+        printf("Segment:seg_loc:%lx lock:%lu local_depth:%lu seg_ptr:%lx\n", i,
                  dir->segs[i].split_lock, dir->segs[i].local_depth, dir->segs[i].seg_ptr);
     }
 }
@@ -181,6 +181,7 @@ task<> RACEClient::insert(Slice *key, Slice *value)
     auto wkv = conn->write(kvblock_ptr, rmr.rkey, kv_block, kvblock_len, lmr->lkey);
     uint64_t retry_cnt = 0;
 Retry:
+    alloc.ReSet(sizeof(Directory)+kvblock_len);
     perf.StartPerf();
     retry_cnt++;
     // Read Segment Ptr From CCEH_Cache
@@ -226,9 +227,15 @@ Retry:
     if (slot_ptr == 0ul)
     {
         // log_info("[%lu:%lu]Insert:%lu %s Split", cli_id, coro_id, *(uint64_t *)key->data, buc->local_depth == dir->global_depth ? "global" : "local");
+        // if(retry_cnt%1000==0){
+        //     log_err("[%lu:%lu]Split for :%lo with local_depth:%d global_depth:%ld segloc:%lu",cli_id,coro_id,*(uint64_t*)key->data,buc->local_depth , dir->global_depth,segloc);
+        // }
         if (retry_cnt > 20000)
         {
-            // log_err("[%lu:%lu]Too much Split for Insert:%lu %s Split",cli_id,coro_id,*(uint64_t*)key->data,buc->local_depth == dir->global_depth? "global":"local");
+            log_err("[%lu:%lu]Too much Split for Insert:%lo with local_depth:%d global_depth:%ld",cli_id,coro_id,*(uint64_t*)key->data,buc->local_depth , dir->global_depth);
+            co_await sync_dir();
+            PrintDir(dir);
+            exit(-1);
             co_return;
         }
         co_await Split(segloc, segptr, buc->local_depth, buc->local_depth == dir->global_depth);
@@ -272,7 +279,7 @@ Retry:
                                     buc->slots[i].len, lmr->lkey);
                 if (memcmp(key->data, tmp_key + sizeof(uint64_t) * 2, key->len) == 0)
                 {
-                    log_err("Duplicate-key");
+                    log_err("[%lu:%lu]Duplicate-key :%lu",cli_id, coro_id, *(uint64_t *)key->data);
                     co_await conn->cas_n(buc_ptr + sizeof(uint64_t) * (i + 1), rmr.rkey, *(uint64_t *)tmp, 0);
                 }
             }

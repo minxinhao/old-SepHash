@@ -17,7 +17,7 @@ namespace RACE{
 constexpr uint64_t SLOT_PER_BUCKET = 8;
 constexpr uint64_t BUCKET_BITS = 6;
 constexpr uint64_t BUCKET_PER_SEGMENT = 1 << (BUCKET_BITS);
-constexpr uint64_t INIT_DEPTH = 16;
+constexpr uint64_t INIT_DEPTH = 4;
 constexpr uint64_t MAX_DEPTH = 22;
 constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
 
