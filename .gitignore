@@ -1,7 +1,0 @@
-*
-!*.sh
-!/include/*.h
-!/src/*.cc
-!/test/*.cc
-!/lib/search.o
-
