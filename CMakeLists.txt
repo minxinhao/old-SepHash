@@ -15,6 +15,10 @@ link_directories(
   /opt/intel/oneapi/mkl/latest/lib/intel64
 )
 
+# 现在改为手动编译search.cc为.s，再手动删除vzeroupper后编成.o
+# add_library(search OBJECT "src/search.cc")
+# set_target_properties(search PROPERTIES COMPILE_FLAGS "-O3 -march=native")
+
 AUX_SOURCE_DIRECTORY ("src" src)
 list(REMOVE_ITEM src "src/search.cc")
 
