@@ -616,4 +616,67 @@ task<> RACEClient::UnlockDir()
     co_await conn->cas_n(rmr.raddr, rmr.rkey, 1, 0);
 }
 
+
+task<> RACEClient::search(Slice *key, Slice *value){
+    alloc.ReSet(sizeof(Directory));
+    uint64_t retry_cnt = 0;
+
+    // 1st RTT: Using RDMA doorbell batching to fetch two combined buckets
+    uint64_t pattern_1, pattern_2;
+    auto pattern = hash(key->data, key->len);
+    pattern_1 = (uint64_t)pattern;
+    pattern_2 = (uint64_t)(pattern >> 64);
+    uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
+    uintptr_t segptr = dir->segs[segloc].seg_ptr;
+    
+    if(dir->segs[segloc].split_lock == 1){
+        // 暂时不用实现这部分
+        // co_return SearchOnResize(key,value);
+        log_err("Locked Segment After Load");
+    }
+
+    // Compute two bucket location
+    uint64_t bucidx_1, bucidx_2; // calculate bucket idx for each key
+    uintptr_t bucptr_1, bucptr_2;
+    bucidx_1 = get_buc_loc(pattern_1);
+    bucidx_2 = get_buc_loc(pattern_2);
+    bucptr_1 = segptr + get_buc_off(bucidx_1);
+    bucptr_2 = segptr + get_buc_off(bucidx_2);
+    Bucket *buc_data = (Bucket *)alloc.alloc(4ul * sizeof(Bucket));
+    auto rbuc1 = conn->read(bucptr_1, rmr.rkey, buc_data, 2 * sizeof(Bucket), lmr->lkey);
+    auto rbuc2 = conn->read(bucptr_2, rmr.rkey, buc_data + 2, 2 * sizeof(Bucket), lmr->lkey);
+    co_await std::move(rbuc2);
+    co_await std::move(rbuc1);
+    if (IsCorrectBucket(segloc, buc_data, pattern_1) == false || IsCorrectBucket(segloc, buc_data+2, pattern_2) == false){
+        // co_return SearchOnResize(key,value);
+        log_err("Wrong Bucket After Load");
+    }
+
+    // Search the slots of two buckets for the key
+    Bucket* buc;
+    uintptr_t buc_ptr;
+    for (uint64_t round = 0; round < 4; round++)
+    {
+        buc = buc_data + round;
+        buc_ptr = (round / 2 ? bucptr_2 : bucptr_1) + (round % 2 ? sizeof(Bucket) : 0);
+        for (uint64_t i = 0; i < SLOT_PER_BUCKET; i++)
+        {
+            if (buc->slots[i].fp == FP(pattern_1))
+            {
+                KVBlock* kv_block = (KVBlock *)alloc.alloc(buc->slots[i].len);
+                co_await conn->read(ralloc.ptr(buc->slots[i].offset), rmr.rkey, kv_block, buc->slots[i].len, lmr->lkey);
+                if (memcmp(key->data, kv_block->data, key->len) == 0)
+                {
+                    value->len = kv_block->v_len;
+                    memcpy(value->data,kv_block->data+kv_block->k_len,value->len);
+                    co_return;
+                }
+            }
+        }
+    }
+    log_err("[%lu:%lu]No match key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
+
+}
+
+
 } // NAMESPACE RACE

@@ -1,15 +1,16 @@
-#include <stdint.h>
-#include <set>
-#include "race.h"
-#include "kv_trait.h"
 #include "generator.h"
+#include "kv_trait.h"
+#include "race.h"
+#include <set>
+#include <stdint.h>
 // #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
 using ClientType = RACE::RACEClient;
 using ServerType = RACE::RACEServer;
 
-inline uint64_t GenKey(uint64_t key){
+inline uint64_t GenKey(uint64_t key)
+{
 #ifdef ORDERED_INSERT
     return key;
 #else
@@ -18,8 +19,7 @@ inline uint64_t GenKey(uint64_t key){
 }
 
 template <class Client>
-requires KVTrait<Client, Slice *, Slice *>
-    task<> load(Client *cli, uint64_t cli_id, uint64_t coro_id)
+requires KVTrait<Client, Slice *, Slice *> task<> load(Client *cli, uint64_t cli_id, uint64_t coro_id)
 {
     co_await cli->start(config.num_machine * config.num_cli * config.num_coro);
     uint64_t tmp_key;
@@ -32,7 +32,8 @@ requires KVTrait<Client, Slice *, Slice *>
     uint64_t num_op = load_num / (config.num_machine * config.num_cli * config.num_coro);
     for (uint64_t i = 0; i < num_op; i++)
     {
-        tmp_key = GenKey((config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op + i);
+        tmp_key = GenKey(
+            (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op + i);
         co_await cli->insert(&key, &value);
     }
     co_await cli->stop();
@@ -40,12 +41,13 @@ requires KVTrait<Client, Slice *, Slice *>
 }
 
 template <class Client>
-requires KVTrait<Client, Slice *, Slice *>
-    task<> run(Generator *gen, Client *cli, uint64_t cli_id, uint64_t coro_id)
+requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cli, uint64_t cli_id, uint64_t coro_id)
 {
     co_await cli->start(config.num_machine * config.num_cli * config.num_coro);
     uint64_t tmp_key;
+    char buffer[1024];
     Slice key, value, ret_value;
+    ret_value.data = buffer;
     std::string tmp_value = std::string(32, '1');
     value.len = tmp_value.length();
     value.data = (char *)tmp_value.data();
@@ -59,15 +61,24 @@ requires KVTrait<Client, Slice *, Slice *>
     uint64_t num_op = config.num_op / (config.num_machine * config.num_cli * config.num_coro);
     for (uint64_t i = 0; i < num_op; i++)
     {
-        tmp_key = GenKey(load_num + (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op + gen->operator()(key_chooser()));
         op_frac = op_chooser();
         if (op_frac < config.insert_frac)
         {
+            tmp_key = GenKey(
+                load_num +
+                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
+                gen->operator()(key_chooser()));
             co_await cli->insert(&key, &value);
         }
         else if (op_frac < read_frac)
         {
-            // co_await cli->search(&key, &ret_value);
+            tmp_key = GenKey(
+                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
+                gen->operator()(key_chooser()));
+            co_await cli->search(&key, &ret_value);
+            if(ret_value.len!=value.len || memcmp(ret_value.data,value.data,value.len)!=0){
+                log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s",cli_id,coro_id,tmp_key,ret_value.data,value.data);
+            }
         }
         else
         {
@@ -104,8 +115,10 @@ int main(int argc, char *argv[])
             assert(rdma_conns[i] != nullptr);
             for (uint64_t j = 0; j < config.num_coro; j++)
             {
-                lmrs[i * config.num_coro + j] = dev.create_mr(cbuf_size, mem_buf + cbuf_size * (i * config.num_coro + j));
-                auto cli = new ClientType(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i], config.machine_id, i, j);
+                lmrs[i * config.num_coro + j] =
+                    dev.create_mr(cbuf_size, mem_buf + cbuf_size * (i * config.num_coro + j));
+                auto cli = new ClientType(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],
+                                          config.machine_id, i, j);
                 clis.push_back(cli);
             }
         }
@@ -114,8 +127,7 @@ int main(int argc, char *argv[])
         auto start = std::chrono::steady_clock::now();
         for (uint64_t i = 0; i < config.num_cli; i++)
         {
-            auto th = [&](rdma_client *rdma_cli, uint64_t cli_id)
-            {
+            auto th = [&](rdma_client *rdma_cli, uint64_t cli_id) {
                 std::vector<task<>> tasks;
                 for (uint64_t j = 0; j < config.num_coro; j++)
                 {
@@ -140,25 +152,32 @@ int main(int argc, char *argv[])
         std::vector<Generator *> gens;
         for (uint64_t i = 0; i < config.num_cli * config.num_coro; i++)
         {
-            if (config.pattern_type == 0){
+            if (config.pattern_type == 0)
+            {
                 gens.push_back(new seq_gen(op_per_coro));
-            }else if (config.pattern_type == 1){
+            }
+            else if (config.pattern_type == 1)
+            {
                 gens.push_back(new uniform(op_per_coro));
-            }else if (config.pattern_type == 2){
+            }
+            else if (config.pattern_type == 2)
+            {
                 gens.push_back(new zipf99(op_per_coro));
-            }else{
+            }
+            else
+            {
                 gens.push_back(new SkewedLatestGenerator(op_per_coro));
             }
         }
         start = std::chrono::steady_clock::now();
         for (uint64_t i = 0; i < config.num_cli; i++)
         {
-            auto th = [&](rdma_client *rdma_cli, uint64_t cli_id)
-            {
+            auto th = [&](rdma_client *rdma_cli, uint64_t cli_id) {
                 std::vector<task<>> tasks;
                 for (uint64_t j = 0; j < config.num_coro; j++)
                 {
-                    tasks.emplace_back(run(gens[cli_id * config.num_coro + j], clis[cli_id * config.num_coro + j], cli_id, j));
+                    tasks.emplace_back(
+                        run(gens[cli_id * config.num_coro + j], clis[cli_id * config.num_coro + j], cli_id, j));
                 }
                 rdma_cli->run(gather(std::move(tasks)));
             };
@@ -174,7 +193,8 @@ int main(int argc, char *argv[])
         printf("Run duration:%.2lfms\n", duration);
         printf("Run IOPS:%.2lfKops\n", op_cnt / duration);
 
-        for(auto gen:gens){
+        for (auto gen : gens)
+        {
             delete gen;
         }
 
