@@ -63,12 +63,14 @@ public:
     task<> reset_remote();
 
     task<> insert(Slice *key, Slice *value);
-    task<> search(Slice *key, Slice *value);
+    task<std::tuple<uintptr_t,uint64_t>> search(Slice *key, Slice *value); // return slotptr
     task<> update(Slice *key, Slice *value);
     task<> remove(Slice *key);
     
 private:
     task<> sync_dir();
+    task<std::tuple<uintptr_t,uint64_t>> search_on_resize(Slice *key, Slice *value);
+    task<bool> search_bucket(Slice* key,Slice *value,uintptr_t& slot_ptr,uint64_t& slot,Bucket* buc_data,uintptr_t bucptr_1,uintptr_t bucptr_2, uint64_t pattern_1);
 
     bool FindLessBucket(Bucket *buc1, Bucket *buc2);
 

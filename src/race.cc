@@ -155,6 +155,7 @@ task<> RACEClient::reset_remote()
 
 task<> RACEClient::start(uint64_t total)
 {
+    // co_await sync_dir();
     uint64_t *start_cnt = (uint64_t *)alloc.alloc(sizeof(uint64_t), true);
     *start_cnt = 0;
     co_await conn->fetch_add(rmr.raddr + sizeof(Directory) - sizeof(uint64_t), rmr.rkey, *start_cnt, 1);
@@ -438,7 +439,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
         // 所以记得再把这部分隐藏的数据修改为0就行
         // 这部分大小应该不超过2-3吧，只能根据经验来设置了
         uint64_t dir_size = 1 << dir->global_depth;
-        memcpy(dir->segs + dir_size, dir->segs, dir_size * sizeof(DirEntry)); 
+        memcpy(dir->segs + dir_size, dir->segs, dir_size * sizeof(DirEntry));
         dir->segs[new_seg_loc].local_depth = local_depth + 1;
         dir->segs[new_seg_loc].split_lock = 1;
         dir->segs[new_seg_loc].seg_ptr = new_seg_ptr;
@@ -492,7 +493,8 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     }
     else
     {
-        uint64_t stride = (1llu) << (dir->global_depth - local_depth + 2); // 这里增加2，是为了给隐式置为1的部分entry解锁
+        uint64_t stride =
+            (1llu) << (dir->global_depth - local_depth + 2); // 这里增加2，是为了给隐式置为1的部分entry解锁
         uint64_t cur_seg_loc;
         for (uint64_t i = 0; i < stride; i++)
         {
@@ -559,7 +561,7 @@ task<> RACEClient::MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment 
                     co_await SetSlot(main_buc_ptr2, *(uint64_t *)(&cur_buc->slots[slot_idx])) &&
                     co_await SetSlot(over_buc_ptr2, *(uint64_t *)(&cur_buc->slots[slot_idx])))
                 {
-                    // log_err("Fail to move data");
+                    log_err("Fail to move data");
                     continue;
                 }
 
@@ -616,10 +618,9 @@ task<> RACEClient::UnlockDir()
     co_await conn->cas_n(rmr.raddr, rmr.rkey, 1, 0);
 }
 
-
-task<> RACEClient::search(Slice *key, Slice *value){
+task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *value)
+{
     alloc.ReSet(sizeof(Directory));
-    uint64_t retry_cnt = 0;
 
     // 1st RTT: Using RDMA doorbell batching to fetch two combined buckets
     uint64_t pattern_1, pattern_2;
@@ -628,11 +629,13 @@ task<> RACEClient::search(Slice *key, Slice *value){
     pattern_2 = (uint64_t)(pattern >> 64);
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
     uintptr_t segptr = dir->segs[segloc].seg_ptr;
-    
-    if(dir->segs[segloc].split_lock == 1){
+
+    if (dir->segs[segloc].split_lock == 1)
+    {
         // 暂时不用实现这部分
-        // co_return SearchOnResize(key,value);
-        log_err("Locked Segment After Load");
+        // log_err("Locked Segment After Load");
+        auto slot_info = co_await search_on_resize(key, value);
+        co_return slot_info;
     }
 
     // Compute two bucket location
@@ -647,13 +650,91 @@ task<> RACEClient::search(Slice *key, Slice *value){
     auto rbuc2 = conn->read(bucptr_2, rmr.rkey, buc_data + 2, 2 * sizeof(Bucket), lmr->lkey);
     co_await std::move(rbuc2);
     co_await std::move(rbuc1);
-    if (IsCorrectBucket(segloc, buc_data, pattern_1) == false || IsCorrectBucket(segloc, buc_data+2, pattern_2) == false){
-        // co_return SearchOnResize(key,value);
-        log_err("Wrong Bucket After Load");
+    if (IsCorrectBucket(segloc, buc_data, pattern_1) == false ||
+        IsCorrectBucket(segloc, buc_data + 2, pattern_2) == false)
+    {
+        // log_err("Wrong Bucket After Load");
+        auto slot_info = co_await search_on_resize(key, value);
+        co_return slot_info;
     }
 
     // Search the slots of two buckets for the key
-    Bucket* buc;
+    uintptr_t slot_ptr;
+    uint64_t slot;
+    if (co_await search_bucket(key, value, slot_ptr, slot, buc_data, bucptr_1, bucptr_2, pattern_1))
+        co_return std::make_tuple(slot_ptr, slot);
+    log_err("[%lu:%lu]No match key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
+    co_return std::make_tuple(0ull, 0);
+}
+
+task<std::tuple<uintptr_t, uint64_t>> RACEClient::search_on_resize(Slice *key, Slice *value)
+{
+    uintptr_t slot_ptr;
+    uint64_t slot;
+Retry:
+    co_await sync_dir();
+    uint64_t pattern_1, pattern_2;
+    auto pattern = hash(key->data, key->len);
+    pattern_1 = (uint64_t)pattern;
+    pattern_2 = (uint64_t)(pattern >> 64);
+    uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
+    uintptr_t segptr = dir->segs[segloc].seg_ptr;
+
+    // Compute two bucket location
+    uint64_t bucidx_1, bucidx_2; // calculate bucket idx for each key
+    uintptr_t bucptr_1, bucptr_2;
+    bucidx_1 = get_buc_loc(pattern_1);
+    bucidx_2 = get_buc_loc(pattern_2);
+    bucptr_1 = segptr + get_buc_off(bucidx_1);
+    bucptr_2 = segptr + get_buc_off(bucidx_2);
+    Bucket *buc_data = (Bucket *)alloc.alloc(4ul * sizeof(Bucket));
+    auto rbuc1 = conn->read(bucptr_1, rmr.rkey, buc_data, 2 * sizeof(Bucket), lmr->lkey);
+    auto rbuc2 = conn->read(bucptr_2, rmr.rkey, buc_data + 2, 2 * sizeof(Bucket), lmr->lkey);
+    co_await std::move(rbuc2);
+    co_await std::move(rbuc1);
+
+    // Search the slots of two buckets for the key
+    if (co_await search_bucket(key, value, slot_ptr, slot, buc_data, bucptr_1, bucptr_2, pattern_1))
+        co_return std::make_tuple(slot_ptr, slot);
+
+    if (IsCorrectBucket(segloc, buc_data, pattern_1) == false ||
+        IsCorrectBucket(segloc, buc_data + 2, pattern_2) == false)
+    {
+        goto Retry;
+    }
+
+    // Check if the subtable is being resized
+    uint64_t first_bit = segloc & (1 << buc_data->local_depth);
+    if (dir->segs[segloc].split_lock == 1 && first_bit)
+    {
+        // Search in the old subtable before resizing
+        uint64_t old_segloc = get_seg_loc(pattern_1, buc_data->local_depth);
+        uintptr_t old_segptr = dir->segs[segloc].seg_ptr;
+        uintptr_t old_bucptr_1 = old_segptr + get_buc_off(bucidx_1);
+        uintptr_t old_bucptr_2 = old_segptr + get_buc_off(bucidx_2);
+        auto rbuc1 = conn->read(old_bucptr_1, rmr.rkey, buc_data, 2 * sizeof(Bucket), lmr->lkey);
+        auto rbuc2 = conn->read(old_bucptr_2, rmr.rkey, buc_data + 2, 2 * sizeof(Bucket), lmr->lkey);
+        co_await std::move(rbuc2);
+        co_await std::move(rbuc1);
+        if (co_await search_bucket(key, value, slot_ptr, slot, buc_data, old_bucptr_1, old_bucptr_2, pattern_1))
+            co_return std::make_tuple(slot_ptr, slot);
+
+        // Search in the subtable again
+        auto rbuc3 = conn->read(bucptr_1, rmr.rkey, buc_data, 2 * sizeof(Bucket), lmr->lkey);
+        auto rbuc4 = conn->read(bucptr_2, rmr.rkey, buc_data + 2, 2 * sizeof(Bucket), lmr->lkey);
+        co_await std::move(rbuc4);
+        co_await std::move(rbuc3);
+        if (co_await search_bucket(key, value, slot_ptr, slot, buc_data, bucptr_1, bucptr_2, pattern_1))
+            co_return std::make_tuple(slot_ptr, slot);
+    }
+    slot_ptr = 0ull;
+    log_err("[%lu:%lu]No match key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
+}
+
+task<bool> RACEClient::search_bucket(Slice *key, Slice *value, uintptr_t &slot_ptr, uint64_t &slot, Bucket *buc_data,
+                                     uintptr_t bucptr_1, uintptr_t bucptr_2, uint64_t pattern_1)
+{
+    Bucket *buc;
     uintptr_t buc_ptr;
     for (uint64_t round = 0; round < 4; round++)
     {
@@ -663,20 +744,46 @@ task<> RACEClient::search(Slice *key, Slice *value){
         {
             if (buc->slots[i].fp == FP(pattern_1))
             {
-                KVBlock* kv_block = (KVBlock *)alloc.alloc(buc->slots[i].len);
+                KVBlock *kv_block = (KVBlock *)alloc.alloc(buc->slots[i].len);
                 co_await conn->read(ralloc.ptr(buc->slots[i].offset), rmr.rkey, kv_block, buc->slots[i].len, lmr->lkey);
                 if (memcmp(key->data, kv_block->data, key->len) == 0)
                 {
+                    slot_ptr = buc_ptr + sizeof(uint64_t) + sizeof(Slot) * i;
+                    slot = *(uint64_t *)&(buc->slots[i]);
                     value->len = kv_block->v_len;
-                    memcpy(value->data,kv_block->data+kv_block->k_len,value->len);
-                    co_return;
+                    memcpy(value->data, kv_block->data + kv_block->k_len, value->len);
+                    co_return true;
                 }
             }
         }
     }
-    log_err("[%lu:%lu]No match key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
-
+    co_return false;
 }
 
+task<> RACEClient::remove(Slice *key)
+{
+    char data[1024];
+    Slice ret_value;
+    ret_value.data = data;
+Retry:
+    // 1st RTT: Using RDMA doorbell batching to fetch two combined buckets
+    uint64_t pattern_1, pattern_2;
+    auto pattern = hash(key->data, key->len);
+    pattern_1 = (uint64_t)pattern;
+    pattern_2 = (uint64_t)(pattern >> 64);
+    uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
+    uintptr_t segptr = dir->segs[segloc].seg_ptr;
+
+    if (dir->segs[segloc].split_lock == 1)
+        goto Retry;
+
+    auto [slot_ptr, slot] = co_await search(key, &ret_value);
+    if (slot_ptr != 0ull)
+    {
+        // 3rd RTT: Setting the key-value block to full zero
+        if (!co_await conn->cas_n(slot_ptr, rmr.rkey, 0, slot))
+            goto Retry;
+    }
+}
 
 } // NAMESPACE RACE
