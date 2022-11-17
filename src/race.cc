@@ -633,8 +633,7 @@ task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *valu
 
     if (dir->segs[segloc].split_lock == 1)
     {
-        // 暂时不用实现这部分
-        log_err("Locked Segment After Load");
+        // log_err("Locked Segment After Load");
         auto slot_info = co_await search_on_resize(key, value);
         co_return slot_info;
     }
@@ -654,7 +653,7 @@ task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *valu
     if (IsCorrectBucket(segloc, buc_data, pattern_1) == false ||
         IsCorrectBucket(segloc, buc_data + 2, pattern_2) == false)
     {
-        log_err("Wrong Bucket After Load");
+        // log_err("Wrong Bucket After Load");
         auto slot_info = co_await search_on_resize(key, value);
         co_return slot_info;
     }

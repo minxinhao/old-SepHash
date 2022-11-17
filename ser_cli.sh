@@ -20,12 +20,19 @@ else
             --max_coro 256 --cq_size 64 \
             --machine_id $1  \
             --num_op 1000000 \
+            --pattern_type 2 \
             --insert_frac 0.0 \
-            --read_frac   0.0 \
-            --update_frac  1.0 \
+            --read_frac   0.5 \
+            --update_frac  0.5 \
             --delete_frac  0.0 
         done 
     done
 fi
 
 
+# YCSB A : read:0.5,update:0.5 zipfian(2)
+# YCSB B : read:0.95,update:0.05 zipfian(2)
+# YCSB C : read:1.0,update:0.0 zipfian(2)
+# YCSB D : read:0.95,insert:0.5 latest(3)
+# YCSB E : scan--不考虑
+# YCSB F : read:0.5,rmq:0.5 zipfian(2) -- RMW ，不考虑

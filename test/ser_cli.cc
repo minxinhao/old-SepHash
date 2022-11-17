@@ -97,14 +97,14 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
                 (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
                 gen->operator()(key_chooser()));
             co_await cli->update(&key,&update_value);
-            auto [slot_ptr, slot] = co_await cli->search(&key, &ret_value);
-            if (slot_ptr == 0ull)
-                log_err("[%lu:%lu]update for key:%lu result in loss", cli_id, coro_id, tmp_key);
-            else if (ret_value.len != update_value.len || memcmp(ret_value.data, update_value.data, update_value.len) != 0)
-            {
-                log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s", cli_id, coro_id, tmp_key,
-                        ret_value.data, update_value.data);
-            }
+            // auto [slot_ptr, slot] = co_await cli->search(&key, &ret_value);
+            // if (slot_ptr == 0ull)
+            //     log_err("[%lu:%lu]update for key:%lu result in loss", cli_id, coro_id, tmp_key);
+            // else if (ret_value.len != update_value.len || memcmp(ret_value.data, update_value.data, update_value.len) != 0)
+            // {
+            //     log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s", cli_id, coro_id, tmp_key,
+            //             ret_value.data, update_value.data);
+            // }
         }
         else
         {
