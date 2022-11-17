@@ -561,7 +561,8 @@ task<> RACEClient::MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment 
                     co_await SetSlot(main_buc_ptr2, *(uint64_t *)(&cur_buc->slots[slot_idx])) &&
                     co_await SetSlot(over_buc_ptr2, *(uint64_t *)(&cur_buc->slots[slot_idx])))
                 {
-                    log_err("Fail to move data");
+                    uintptr_t slot_ptr = buc_ptr + sizeof(uint64_t) + sizeof(Slot) * i;
+                    log_err("[%lu:%lu]Fail to move slot_ptr:%lx",cli_id,coro_id,slot_ptr);
                     continue;
                 }
 
@@ -633,7 +634,7 @@ task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *valu
     if (dir->segs[segloc].split_lock == 1)
     {
         // 暂时不用实现这部分
-        // log_err("Locked Segment After Load");
+        log_err("Locked Segment After Load");
         auto slot_info = co_await search_on_resize(key, value);
         co_return slot_info;
     }
@@ -653,7 +654,7 @@ task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *valu
     if (IsCorrectBucket(segloc, buc_data, pattern_1) == false ||
         IsCorrectBucket(segloc, buc_data + 2, pattern_2) == false)
     {
-        // log_err("Wrong Bucket After Load");
+        log_err("Wrong Bucket After Load");
         auto slot_info = co_await search_on_resize(key, value);
         co_return slot_info;
     }
@@ -663,7 +664,7 @@ task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *valu
     uint64_t slot;
     if (co_await search_bucket(key, value, slot_ptr, slot, buc_data, bucptr_1, bucptr_2, pattern_1))
         co_return std::make_tuple(slot_ptr, slot);
-    log_err("[%lu:%lu]No match key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
+    // log_err("[%lu:%lu]No match key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
     co_return std::make_tuple(0ull, 0);
 }
 
@@ -671,7 +672,11 @@ task<std::tuple<uintptr_t, uint64_t>> RACEClient::search_on_resize(Slice *key, S
 {
     uintptr_t slot_ptr;
     uint64_t slot;
+    uint64_t cnt = 0;
 Retry:
+    if((++cnt)%1000==0)
+        log_err("[%lu:%lu]search_on_resize for key:%lx",cli_id,coro_id,*(uint64_t*)key->data);
+    alloc.ReSet(sizeof(Directory));
     co_await sync_dir();
     uint64_t pattern_1, pattern_2;
     auto pattern = hash(key->data, key->len);
@@ -727,8 +732,8 @@ Retry:
         if (co_await search_bucket(key, value, slot_ptr, slot, buc_data, bucptr_1, bucptr_2, pattern_1))
             co_return std::make_tuple(slot_ptr, slot);
     }
-    slot_ptr = 0ull;
-    log_err("[%lu:%lu]No match key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
+    // log_err("[%lu:%lu]No match key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
+    co_return std::make_tuple(0ull, 0);
 }
 
 task<bool> RACEClient::search_bucket(Slice *key, Slice *value, uintptr_t &slot_ptr, uint64_t &slot, Bucket *buc_data,
@@ -742,7 +747,7 @@ task<bool> RACEClient::search_bucket(Slice *key, Slice *value, uintptr_t &slot_p
         buc_ptr = (round / 2 ? bucptr_2 : bucptr_1) + (round % 2 ? sizeof(Bucket) : 0);
         for (uint64_t i = 0; i < SLOT_PER_BUCKET; i++)
         {
-            if (buc->slots[i].fp == FP(pattern_1))
+            if (*(uint64_t*)(&buc->slots[i]) && buc->slots[i].fp == FP(pattern_1))
             {
                 KVBlock *kv_block = (KVBlock *)alloc.alloc(buc->slots[i].len);
                 co_await conn->read(ralloc.ptr(buc->slots[i].offset), rmr.rkey, kv_block, buc->slots[i].len, lmr->lkey);
@@ -765,7 +770,9 @@ task<> RACEClient::remove(Slice *key)
     char data[1024];
     Slice ret_value;
     ret_value.data = data;
+    uint64_t cnt=0;
 Retry:
+    alloc.ReSet(sizeof(Directory));
     // 1st RTT: Using RDMA doorbell batching to fetch two combined buckets
     uint64_t pattern_1, pattern_2;
     auto pattern = hash(key->data, key->len);
@@ -774,15 +781,66 @@ Retry:
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
     uintptr_t segptr = dir->segs[segloc].seg_ptr;
 
-    if (dir->segs[segloc].split_lock == 1)
+    if (dir->segs[segloc].split_lock == 1){
+        co_await sync_dir();
         goto Retry;
+    }
 
     auto [slot_ptr, slot] = co_await search(key, &ret_value);
     if (slot_ptr != 0ull)
     {
+        // if((++cnt)%1000==0)
+        //     log_err("[%lu:%lu]slot_ptr:%lx slot:%lx for %lu to be deleted with pattern_1:%lx",cli_id,coro_id,slot_ptr,slot,*(uint64_t*)key->data,pattern_1);
         // 3rd RTT: Setting the key-value block to full zero
-        if (!co_await conn->cas_n(slot_ptr, rmr.rkey, 0, slot))
+        if (!co_await conn->cas_n(slot_ptr, rmr.rkey, slot , 0)){
+            log_err("[%lu:%lu]fail to cas slot_ptr:%lx for %lu to zero",cli_id,coro_id,slot_ptr,*(uint64_t*)key->data);
             goto Retry;
+        }
+    }else{
+        log_err("[%lu:%lu]No match key for %lu to be deleted",cli_id,coro_id,*(uint64_t*)key->data);
+    }
+}
+
+task<> RACEClient::update(Slice *key,Slice *value)
+{
+    char data[1024];
+    Slice ret_value;
+    ret_value.data = data;
+    KVBlock *kv_block = InitKVBlock(key, value, &alloc);
+    uint64_t kvblock_len = key->len + value->len + sizeof(uint64_t) * 2;
+    uint64_t kvblock_ptr = ralloc.alloc(kvblock_len);
+    auto wkv = conn->write(kvblock_ptr, rmr.rkey, kv_block, kvblock_len, lmr->lkey);
+    
+    uint64_t pattern_1, pattern_2;
+    auto pattern = hash(key->data, key->len);
+    pattern_1 = (uint64_t)pattern;
+    pattern_2 = (uint64_t)(pattern >> 64);
+    uint64_t cnt = 0 ;
+Retry:
+    alloc.ReSet(sizeof(Directory)+kvblock_len);
+    // 1st RTT: Using RDMA doorbell batching to fetch two combined buckets
+    uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
+    uintptr_t segptr = dir->segs[segloc].seg_ptr;
+
+    if (dir->segs[segloc].split_lock == 1){
+        co_await sync_dir();
+        goto Retry;
+    }
+
+    auto [slot_ptr, slot] = co_await search(key, &ret_value);
+    Slot *tmp = (Slot *)alloc.alloc(sizeof(Slot));
+    tmp->fp = FP(pattern_1);
+    tmp->len = kvblock_len;
+    tmp->offset = ralloc.offset(kvblock_ptr);
+    if (slot_ptr != 0ull)
+    {
+        // log_err("[%lu:%lu]slot_ptr:%lx slot:%lx for %lu to be updated with new slot: fp:%d len:%d offset:%lx",cli_id,coro_id,slot_ptr,slot,*(uint64_t*)key->data,tmp->fp,tmp->len,tmp->offset);
+        if(cnt++==0) co_await std::move(wkv) ;
+        // 3rd RTT: Setting the key-value block to full zero
+        if (!co_await conn->cas_n(slot_ptr, rmr.rkey, slot, *(uint64_t*)tmp))
+            goto Retry;
+    }else{
+        log_err("[%lu:%lu]No match key for %lu to update",cli_id,coro_id,*(uint64_t*)key->data);
     }
 }
 

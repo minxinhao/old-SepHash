@@ -46,16 +46,24 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
     co_await cli->start(config.num_machine * config.num_cli * config.num_coro);
     uint64_t tmp_key;
     char buffer[1024];
-    Slice key, value, ret_value;
+    Slice key, value, ret_value,update_value;
+    
     ret_value.data = buffer;
+
     std::string tmp_value = std::string(32, '1');
     value.len = tmp_value.length();
     value.data = (char *)tmp_value.data();
+
+    std::string tmp_value_2 = std::string(32, '2');
+    update_value.len = tmp_value_2.length();
+    update_value.data = (char *)tmp_value_2.data();
+
     key.len = sizeof(uint64_t);
     key.data = (char *)&tmp_key;
 
     double op_frac;
     double read_frac = config.insert_frac + config.read_frac;
+    double update_frac = config.insert_frac + config.read_frac + config.update_frac;
     xoshiro256pp op_chooser;
     xoshiro256pp key_chooser;
     uint64_t num_op = config.num_op / (config.num_machine * config.num_cli * config.num_coro);
@@ -76,13 +84,47 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
                 (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
                 gen->operator()(key_chooser()));
             co_await cli->search(&key, &ret_value);
-            if(ret_value.len!=value.len || memcmp(ret_value.data,value.data,value.len)!=0){
-                log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s",cli_id,coro_id,tmp_key,ret_value.data,value.data);
+            if (ret_value.len != value.len || memcmp(ret_value.data, value.data, value.len) != 0)
+            {
+                log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s", cli_id, coro_id, tmp_key,
+                        ret_value.data, value.data);
+            }
+        }
+        else if (op_frac < update_frac)
+        {
+            // update
+            tmp_key = GenKey(
+                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
+                gen->operator()(key_chooser()));
+            co_await cli->update(&key,&update_value);
+            auto [slot_ptr, slot] = co_await cli->search(&key, &ret_value);
+            if (slot_ptr == 0ull)
+                log_err("[%lu:%lu]update for key:%lu result in loss", cli_id, coro_id, tmp_key);
+            else if (ret_value.len != update_value.len || memcmp(ret_value.data, update_value.data, update_value.len) != 0)
+            {
+                log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s", cli_id, coro_id, tmp_key,
+                        ret_value.data, update_value.data);
             }
         }
         else
         {
-            // update
+            // delete
+            tmp_key = GenKey(
+                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
+                gen->operator()(key_chooser()));
+            co_await cli->remove(&key);
+            // uint64_t cnt = 0;
+            // while(true){
+            //     auto [slot_ptr, slot] = co_await cli->search(&key, &ret_value);
+            //     if (slot_ptr != 0ull)
+            //         log_err("[%lu:%lu]fail to delete value for key:%lu with slot_ptr:%lx and ret_value:%s", cli_id, coro_id, tmp_key,slot_ptr,ret_value.data);
+            //     else 
+            //         break;
+            //     if(cnt++>=3){
+            //         exit(-1);
+            //     }
+            //     co_await cli->remove(&key);
+            // }
         }
     }
     co_await cli->stop();

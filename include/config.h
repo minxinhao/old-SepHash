@@ -22,6 +22,7 @@ struct Config
     double insert_frac;
     double read_frac;
     double update_frac;
+    double delete_frac;
 
     void ParseArg(int argc, char *argv[])
     {
@@ -41,6 +42,7 @@ struct Config
         cmd_parser.add<double>("insert_frac", 'n', "insert_frac", false, 1.0);
         cmd_parser.add<double>("read_frac", 'o', "read_frac", false, 0.0);
         cmd_parser.add<double>("update_frac", 'p', "update_frac", false, 0.0);
+        cmd_parser.add<double>("delete_frac", 'q', "delete_frac", false, 0.0);
 
         cmd_parser.parse_check(argc, argv);
 
@@ -59,9 +61,11 @@ struct Config
         insert_frac = cmd_parser.get<double>("insert_frac");
         read_frac = cmd_parser.get<double>("read_frac");
         update_frac = cmd_parser.get<double>("update_frac");
+        delete_frac = cmd_parser.get<double>("delete_frac");
 
-        if(insert_frac + update_frac + read_frac > 1.0){
+        if(insert_frac + update_frac + read_frac + delete_frac != 1.0){
             printf("err fraction of operations\n");
+            print();
             exit(-1);
         }
         // print();

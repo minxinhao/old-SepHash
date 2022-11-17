@@ -70,6 +70,10 @@
         "iostream": "cpp",
         "sstream": "cpp",
         "ranges": "cpp",
-        "span": "cpp"
+        "span": "cpp",
+        "__tree": "cpp",
+        "unordered_set": "cpp",
+        "set": "cpp",
+        "numeric": "cpp"
     }
 }
