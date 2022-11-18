@@ -7,38 +7,6 @@
 #include "alloc.h"
 // #define USE_PERF
 
-//取24-32的8位hash值作为FP
-#define FP(h) ((uint64_t)((h)>>32)&((1<<8)-1))
-
-struct Slot{
-    uint8_t fp:8;
-    uint8_t len:8;
-    uint64_t offset:48;
-}__attribute__((aligned(8)));
-
-
-struct Slice{
-    uint64_t len;
-    char* data;
-};
-
-struct KVBlock{
-    uint64_t k_len;
-    uint64_t v_len;
-    char data[0]; //变长数组，用来保证KVBlock空间上的连续性，便于RDMA操作
-};
-
-template<typename Alloc>
-requires Alloc_Trait<Alloc,uint64_t>
-KVBlock* InitKVBlock(Slice *key, Slice *value,Alloc* alloc){
-    KVBlock *kv_block = (KVBlock *)alloc->alloc(2 * sizeof(uint64_t) + key->len + value->len);
-    kv_block->k_len = key->len;
-    kv_block->v_len = value->len;
-    memcpy(kv_block->data, key->data, key->len);
-    memcpy(kv_block->data + key->len, value->data, value->len);
-    return kv_block;
-}
-
 struct Perf
 {
     //用于性能统计

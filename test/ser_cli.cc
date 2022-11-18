@@ -8,6 +8,7 @@ Config config;
 uint64_t load_num = 10000000;
 using ClientType = RACE::RACEClient;
 using ServerType = RACE::RACEServer;
+using Slice = RACE::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
