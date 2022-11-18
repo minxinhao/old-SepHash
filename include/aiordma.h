@@ -10,6 +10,8 @@
 
 #include "common.h"
 
+const int wr_wo_await = UINT16_MAX - 1000;
+
 const int mr_flag_lo = IBV_ACCESS_LOCAL_WRITE;
 const int mr_flag_ro = mr_flag_lo | IBV_ACCESS_REMOTE_READ;
 const int mr_flag_rw = mr_flag_ro | IBV_ACCESS_REMOTE_WRITE;
@@ -446,6 +448,8 @@ public:
     dma_future dma_write(doca_mmap *rmmp, uint64_t raddr, doca_mmap *lmmp, void *laddr, size_t len);
     constexpr doca_mmap *lmmp() { return worker->mpmmp; }
 #endif
+
+    void pure_write(uint64_t raddr, uint32_t rkey, void *laddr, uint32_t len, uint32_t lkey = 0);
 
     // co_return int: 1: success, 0: failure
     rdma_future do_send(ibv_send_wr *wr_begin, ibv_send_wr *wr_end);

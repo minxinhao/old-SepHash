@@ -1096,6 +1096,21 @@ rdma_future rdma_conn::write(uint64_t raddr, uint32_t rkey, void *laddr, uint32_
     return res;
 }
 
+void rdma_conn::pure_write(uint64_t raddr, uint32_t rkey, void *laddr, uint32_t len, uint32_t _lkey)
+{    
+    auto [sge,wr] = alloc_many(sizeof(ibv_sge),sizeof(ibv_send_wr));
+    assert_check(sge);
+    auto send_wr = (ibv_send_wr *)wr;
+    fill_rw_wr<IBV_WR_RDMA_WRITE>(send_wr, (ibv_sge *)sge, raddr, rkey, laddr, len, _lkey);
+    if (_lkey == 0)
+        send_wr->send_flags = IBV_SEND_INLINE;
+    send_wr->wr_id = wr_wo_await;
+    send_wr->send_flags |= IBV_SEND_SIGNALED;
+    ibv_send_wr *bad;
+    assert_check(0 == ibv_post_send(qp, send_wr, &bad));
+    free_buf(sge);
+}
+
 // rdma_cas_future rdma_conn::fetch_add(uint64_t raddr, uint32_t rkey, uint64_t &cmpval, uint64_t swapval)
 rdma_cas_future rdma_conn::fetch_add(uint64_t raddr, uint32_t rkey, uint64_t &fetch, uint64_t addval)
 {

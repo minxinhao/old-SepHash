@@ -13,12 +13,13 @@ void switch_other_op()
     //反复shuffle和sort好了
     auto start_time = std::chrono::steady_clock::now();
     uint64_t data[128 * 1024];
-    uint64_t data_size =  128 * 1024;
+    uint64_t data_size = 128 * 1024;
     for (uint64_t i = 0; i < data_size; i++)
     {
         data[i] = i;
     }
-    for(int i = 0 ; i < 16 ; i++ ){
+    for (int i = 0; i < 16; i++)
+    {
         std::random_device rd;
         std::mt19937 g(rd());
         std::shuffle(data, data + data_size, g);
@@ -182,13 +183,115 @@ void test_rread()
     rdma_free_mr(rmr);
 }
 
+void test_cas(uint64_t num_cli, uint64_t num_coro)
+{
+    // Server
+    rdma_dev dev(nullptr, 1, true);
+    rdma_server ser(dev);
+    ibv_mr *rmr;
+    uint64_t mem_size = (1 << 20) * 100;
+    rmr = dev.reg_mr(233, mem_size);
+    ser.start_serve();
+
+    // Cli
+    constexpr uint64_t dev_mem_size = (1 << 10) * 64;              // 64KB的dev mem，用作lock
+    constexpr uint64_t num_lock = dev_mem_size / sizeof(uint64_t); // Lock数量，client对seg_id使用hash来共享lock
+    auto [lock_dm, lock_mr] = dev.reg_dmmr(234, dev_mem_size);
+    uint64_t cbuf_size = (1ul << 20) * 250;
+    char *mem_buf = (char *)malloc(cbuf_size);
+    ibv_mr *lmr = dev.create_mr(cbuf_size, mem_buf);
+    std::vector<rdma_client *> rdma_clis(num_cli, nullptr);
+    std::vector<rdma_conn *> rdma_conns(num_cli, nullptr);
+    std::thread ths[80];
+
+    for (uint64_t i = 0; i < num_cli; i++)
+    {
+        rdma_clis[i] = new rdma_client(dev, so_qp_cap, rdma_default_tempmp_size);
+        rdma_conns[i] = rdma_clis[i]->connect("192.168.1.44");
+        assert(rdma_conns[i] != nullptr);
+    }
+
+    printf("CAS with %lu cli %lu coro\n", num_cli, num_coro);
+    uint64_t num_op = 1000000;
+    auto _rmr = rdma_clis[0]->run(rdma_conns[0]->query_remote_mr(233));
+    auto lock_rmr = rdma_clis[0]->run(rdma_conns[0]->query_remote_mr(234));
+    bool dm_flag = true;
+    bool seq_flag = true;
+    auto test_cas = [&](ibv_mr *lmr, rdma_conn *conn, uint64_t cli_id, uint64_t coro_id) -> task<> {
+        auto __rmr = dm_flag ? lock_rmr : _rmr;
+        uint64_t ptr = (uint64_t)__rmr.raddr;
+        ptr += 32;
+        ptr &= ~7;
+        for (uint64_t i = 0; i < num_op; i++)
+        {
+            if (!seq_flag)
+            {
+                co_await conn->cas_n(ptr, __rmr.rkey, 0, 1);
+                co_await conn->cas_n(ptr, __rmr.rkey, 1, 0);
+            }
+            else
+            {
+                if (!dm_flag)
+                {
+                    co_await conn->cas_n(ptr + (cli_id * num_coro + coro_id) * 8, __rmr.rkey, 0, 1);
+                    co_await conn->cas_n(ptr + (cli_id * num_coro + coro_id) * 8, __rmr.rkey, 1, 0);
+                }
+                else
+                {
+                    co_await conn->cas_n(ptr + ((cli_id * num_coro + coro_id) % num_lock) * 8, __rmr.rkey, 0, 1);
+                    co_await conn->cas_n(ptr + ((cli_id * num_coro + coro_id) % num_lock) * 8, __rmr.rkey, 1, 0);
+                }
+            }
+        }
+    };
+    auto start = std::chrono::steady_clock::now();
+    for (uint64_t i = 0; i < num_cli; i++)
+    {
+        auto th = [=](rdma_client *rdma_cli, uint64_t cli_id) {
+            std::vector<task<>> tasks;
+            for (uint64_t j = 0; j < num_coro; j++)
+            {
+                tasks.emplace_back(test_cas(lmr, rdma_conns[i], i, j));
+            }
+            rdma_cli->run(gather(std::move(tasks)));
+        };
+        ths[i] = std::thread(th, rdma_clis[i], i);
+    }
+    for (uint64_t i = 0; i < num_cli; i++)
+    {
+        ths[i].join();
+    }
+    auto end = std::chrono::steady_clock::now();
+    double op_cnt = 1.0 * num_op * num_cli * num_coro;
+    double duration = std::chrono::duration<double, std::milli>(end - start).count();
+    printf("CAS duration:%.2lfms\n", duration);
+    printf("CAS IOPS:%.2lfKops\n", op_cnt / duration);
+
+    rdma_free_mr(rmr);
+    free(mem_buf);
+    rdma_free_mr(lmr, false);
+    for (uint64_t i = 0; i < num_cli; i++)
+    {
+        delete rdma_conns[i];
+        delete rdma_clis[i];
+    }
+    rdma_free_dmmr({lock_dm, lock_mr});
+}
+
 int main()
 {
     // Search
-    test_linear_search(true, false); // 第一次用来warm up ， 暂时不清楚为啥第一次性能运行这么差
-    // switch_other_op(); // 换用无关代码，看是否能warm up
-    test_linear_search(false, true);
+    // test_linear_search(true, false); // 第一次用来warm up ， 暂时不清楚为啥第一次性能运行这么差
+    // // switch_other_op(); // 换用无关代码，看是否能warm up
+    // test_linear_search(false, true);
 
     // Rdma
     // test_rread();
+    for (uint64_t i = 1; i <= 16; i *= 2)
+    {
+        for (uint64_t j = 1; j <= 4; j++)
+        {
+            test_cas(i, j);
+        }
+    }
 }
