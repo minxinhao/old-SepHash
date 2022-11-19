@@ -278,6 +278,50 @@ void test_cas(uint64_t num_cli, uint64_t num_coro)
     rdma_free_dmmr({lock_dm, lock_mr});
 }
 
+void test_pure_write()
+{
+    // Server
+    rdma_dev dev(nullptr, 1, true);
+    rdma_server ser(dev);
+    ibv_mr *rmr;
+    uint64_t mem_size = (1 << 20) * 100;
+    rmr = dev.reg_mr(233, mem_size);
+    ser.start_serve();
+
+    // Cli
+    ibv_mr *lmr = dev.create_mr(mem_size);
+    rdma_client *rdma_cli = new rdma_client(dev);
+    rdma_conn *conn = rdma_cli->connect("192.168.1.44");
+
+    // write
+    uint64_t batch = 100000;
+    uint64_t test_num = 63;
+    uint64_t write_len = sizeof(uint64_t);
+    auto pure_write = [=]() -> task<> {
+        uint64_t cnt = 0;
+        while (cnt < batch)
+        {
+            for (uint64_t i = 0; i < test_num; i++)
+                conn->pure_write((uint64_t)rmr->addr + i * write_len, rmr->rkey, ((char *)lmr->addr) + i * write_len,
+                                 write_len, lmr->lkey);
+            co_await conn->write((uint64_t)rmr->addr, rmr->rkey, lmr->addr, write_len, lmr->lkey);
+            cnt++;
+        }
+    };
+    auto start = std::chrono::steady_clock::now();
+    rdma_cli->run(pure_write());
+    auto end = std::chrono::steady_clock::now();
+    double op_cnt = 1.0 * batch * (test_num + 1);
+    double duration = std::chrono::duration<double, std::milli>(end - start).count();
+    printf("CAS duration:%.2lfms\n", duration);
+    printf("CAS IOPS:%.2lfKops\n", op_cnt / duration);
+
+    delete conn;
+    delete rdma_cli;
+    rdma_free_mr(lmr);
+    rdma_free_mr(rmr);
+}
+
 int main()
 {
     // Search
@@ -287,11 +331,12 @@ int main()
 
     // Rdma
     // test_rread();
-    for (uint64_t i = 1; i <= 16; i *= 2)
-    {
-        for (uint64_t j = 1; j <= 4; j++)
-        {
-            test_cas(i, j);
-        }
-    }
+    // for (uint64_t i = 1; i <= 16; i *= 2)
+    // {
+    //     for (uint64_t j = 1; j <= 4; j++)
+    //     {
+    //         test_cas(i, j);
+    //     }
+    // }
+    test_pure_write();
 }

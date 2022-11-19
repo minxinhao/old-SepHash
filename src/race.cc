@@ -3,6 +3,11 @@
 namespace RACE
 {
 
+inline __attribute__((always_inline)) uint64_t fp(uint64_t pattern)
+{
+    return ((uint64_t)((pattern)>>32)&((1<<8)-1));
+}
+
 inline __attribute__((always_inline)) uint64_t get_seg_loc(uint64_t pattern, uint64_t global_depth)
 {
     return ((pattern) & ((1 << global_depth) - 1));
@@ -244,7 +249,7 @@ Retry:
     // 2nd RTT: Using RDMA CAS to write the pointer of the key-value block
     perf.StartPerf();
     Slot *tmp = (Slot *)alloc.alloc(sizeof(Slot));
-    tmp->fp = FP(pattern_1);
+    tmp->fp = fp(pattern_1);
     tmp->len = kvblock_len;
     tmp->offset = ralloc.offset(kvblock_ptr);
     perf.AddCnt("SlotCnt");
@@ -746,7 +751,7 @@ task<bool> RACEClient::search_bucket(Slice *key, Slice *value, uintptr_t &slot_p
         buc_ptr = (round / 2 ? bucptr_2 : bucptr_1) + (round % 2 ? sizeof(Bucket) : 0);
         for (uint64_t i = 0; i < SLOT_PER_BUCKET; i++)
         {
-            if (*(uint64_t*)(&buc->slots[i]) && buc->slots[i].fp == FP(pattern_1))
+            if (*(uint64_t*)(&buc->slots[i]) && buc->slots[i].fp == fp(pattern_1))
             {
                 KVBlock *kv_block = (KVBlock *)alloc.alloc(buc->slots[i].len);
                 co_await conn->read(ralloc.ptr(buc->slots[i].offset), rmr.rkey, kv_block, buc->slots[i].len, lmr->lkey);
@@ -828,7 +833,7 @@ Retry:
 
     auto [slot_ptr, slot] = co_await search(key, &ret_value);
     Slot *tmp = (Slot *)alloc.alloc(sizeof(Slot));
-    tmp->fp = FP(pattern_1);
+    tmp->fp = fp(pattern_1);
     tmp->len = kvblock_len;
     tmp->offset = ralloc.offset(kvblock_ptr);
     if (slot_ptr != 0ull)

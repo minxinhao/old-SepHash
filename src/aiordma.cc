@@ -472,6 +472,15 @@ void rdma_worker::worker_loop()
         {
             auto &&wc = wcs[i];
             log_debug("polled %lu", wc.wr_id);
+
+            if(wc.wr_id == wr_wo_await){
+                if (wc.status != IBV_WC_SUCCESS)
+                {
+                    log_warn("got bad completion with status: 0x%x, vendor syndrome: 0x%x", wc.status, wc.vendor_err);
+                }
+                continue;
+            }
+
             auto cor = coros + wc.wr_id;
             if (wc.status != IBV_WC_SUCCESS)
             {

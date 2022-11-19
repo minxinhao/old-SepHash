@@ -1,47 +1,60 @@
 #pragma once
-#include <map>
-#include <vector>
-#include <math.h>
-#include <fcntl.h>
-#include <cassert>
-#include <tuple>
-#include <chrono>
 #include "aiordma.h"
-#include "perf.h"
-#include "hash.h"
-#include "config.h"
 #include "alloc.h"
+#include "config.h"
+#include "hash.h"
+#include "perf.h"
+#include "search.h"
+#include <cassert>
+#include <chrono>
+#include <fcntl.h>
+#include <map>
+#include <math.h>
+#include <tuple>
+#include <vector>
 
-namespace RACE{
+namespace RACEOP
+{
 
-constexpr uint64_t SLOT_PER_BUCKET = 8;
-constexpr uint64_t BUCKET_BITS = 6;
-constexpr uint64_t BUCKET_PER_SEGMENT = 1 << (BUCKET_BITS);
+constexpr uint64_t SEGMENT_SIZE = 2048;
+constexpr uint64_t SLOT_PER_SEGMENT = (SEGMENT_SIZE - sizeof(uint64_t)) / (sizeof(uint64_t));
 constexpr uint64_t INIT_DEPTH = 4;
 constexpr uint64_t MAX_DEPTH = 22;
 constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
+constexpr uint64_t dev_mem_size = (1 << 10) * 64;              // 64KB的dev mem，用作lock
+constexpr uint64_t num_lock = dev_mem_size / sizeof(uint64_t); // Lock数量，client对seg_id使用hash来共享lock
 
-struct Slot{
-    uint8_t fp:8;
-    uint8_t len:8;
-    uint64_t offset:48;
-}__attribute__((aligned(8)));
+struct Slot
+{
+    uint8_t fp : 8;
+    uint8_t len : 8;
+    uint64_t offset : 48;
+    operator uint64_t()
+    {
+        return *(uint64_t *)this;
+    }
+    Slot(uint64_t u)
+    {
+        *this = *(Slot *)(&u);
+    }
+} __attribute__((aligned(8)));
 
-
-struct Slice{
+struct Slice
+{
     uint64_t len;
-    char* data;
+    char *data;
 };
 
-struct KVBlock{
+struct KVBlock
+{
     uint64_t k_len;
     uint64_t v_len;
     char data[0]; //变长数组，用来保证KVBlock空间上的连续性，便于RDMA操作
 };
 
-template<typename Alloc>
-requires Alloc_Trait<Alloc,uint64_t>
-KVBlock* InitKVBlock(Slice *key, Slice *value,Alloc* alloc){
+template <typename Alloc>
+requires Alloc_Trait<Alloc, uint64_t> KVBlock *InitKVBlock(Slice *key, Slice *value, Alloc *alloc)
+{
     KVBlock *kv_block = (KVBlock *)alloc->alloc(2 * sizeof(uint64_t) + key->len + value->len);
     kv_block->k_len = key->len;
     kv_block->v_len = value->len;
@@ -50,16 +63,12 @@ KVBlock* InitKVBlock(Slice *key, Slice *value,Alloc* alloc){
     return kv_block;
 }
 
-struct Bucket
-{
-    uint32_t local_depth;
-    uint32_t suffix;
-    Slot slots[SLOT_PER_BUCKET];
-} __attribute__((aligned(8)));
-
 struct Segment
 {
-    struct Bucket buckets[BUCKET_PER_SEGMENT * 3];
+    // lock被独立放置于device memory上
+    uint32_t local_depth;
+    uint32_t suffix;
+    Slot slots[SLOT_PER_SEGMENT];
 } __attribute__((aligned(8)));
 
 struct DirEntry
@@ -79,8 +88,9 @@ struct Directory
 
 class RACEClient
 {
-public:
-    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id);
+  public:
+    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, uint64_t _machine_id,
+               uint64_t _cli_id, uint64_t _coro_id);
 
     RACEClient(const RACEClient &) = delete;
 
@@ -92,34 +102,28 @@ public:
     task<> reset_remote();
 
     task<> insert(Slice *key, Slice *value);
-    task<std::tuple<uintptr_t,uint64_t>> search(Slice *key, Slice *value); // return slotptr
+    task<std::tuple<uintptr_t, uint64_t>> search(Slice *key, Slice *value); // return slotptr
     task<> update(Slice *key, Slice *value);
     task<> remove(Slice *key);
-    
-private:
+
+  private:
     task<> sync_dir();
-    task<std::tuple<uintptr_t,uint64_t>> search_on_resize(Slice *key, Slice *value);
-    task<bool> search_bucket(Slice* key,Slice *value,uintptr_t& slot_ptr,uint64_t& slot,Bucket* buc_data,uintptr_t bucptr_1,uintptr_t bucptr_2, uint64_t pattern_1);
-
-    bool FindLessBucket(Bucket *buc1, Bucket *buc2);
-
-    uintptr_t FindEmptySlot(Bucket *buc, uint64_t buc_idx, uintptr_t buc_ptr);
-
-    bool IsCorrectBucket(uint64_t segloc, Bucket *buc, uint64_t pattern);
 
     task<int> Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_depth, bool global_flag);
 
     // Global/Local并行的方式造成的等待冲突太高了，就使用简单的单个lock
-    task<int> LockDir();
-    task<> UnlockDir();
-    task<int> SetSlot(uint64_t buc_ptr, uint64_t slot);
-    task<> MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment *seg, Segment *new_seg);
+    // task<int> LockDir();
+    // task<> UnlockDir();
+    // task<int> SetSlot(uint64_t buc_ptr, uint64_t slot);
+    // task<> MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment *seg, Segment *new_seg);
 
     // rdma structs
     rdma_client *cli;
+    struct ibv_mr *lmr; // cli的临时缓存区，用来读写远端内存
     rdma_conn *conn;
-    rdma_rmr rmr;
-    struct ibv_mr *lmr;
+    rdma_conn *wo_wait_conn; //用来发送pure_wait
+    rdma_rmr seg_rmr;
+    rdma_rmr lock_rmr;
 
     Alloc alloc;
     RAlloc ralloc;
@@ -127,7 +131,10 @@ private:
     uint64_t cli_id;
     uint64_t coro_id;
 
-    //Statistic
+    // 运行时保存的临时变量
+    uint64_t op_cnt; //保存已经进行的操作数
+
+    // Statistic
     Perf perf;
 
     // Data part
@@ -136,20 +143,21 @@ private:
 
 class RACEServer
 {
-public:
+  public:
     RACEServer(Config &config);
     ~RACEServer();
 
-private:
-    void Init(Directory *dir);
+  private:
+    void Init();
 
     rdma_dev dev;
     rdma_server ser;
-    struct ibv_mr *lmr;
-    char *mem_buf;
+    struct ibv_mr *seg_mr;
+    ibv_dm *lock_dm; // Locks for Segments
+    ibv_mr *lock_mr;
 
     Alloc alloc;
     Directory *dir;
 };
 
-}//namespace RACE
+} // namespace RACEOP

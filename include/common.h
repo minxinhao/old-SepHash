@@ -23,7 +23,7 @@
 #define LOG_LEVEL_DEBUG 4
 
 #ifndef LOG_LEVEL
-#define LOG_LEVEL LOG_LEVEL_WARNING
+#define LOG_LEVEL LOG_LEVEL_INFO
 #endif
 
 #define do_log(log_type, fmt, arg...) fprintf(stderr, #log_type " [" __FILE__ ":%d] %s: " fmt "\n", __LINE__, __FUNCTION__, ##arg)
