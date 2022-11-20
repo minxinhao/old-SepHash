@@ -1,18 +1,20 @@
 #pragma once
-#include <map>
-#include <vector>
-#include <math.h>
-#include <fcntl.h>
-#include <cassert>
-#include <tuple>
-#include <chrono>
 #include "aiordma.h"
-#include "perf.h"
-#include "hash.h"
-#include "config.h"
 #include "alloc.h"
+#include "config.h"
+#include "hash.h"
+#include "kv_trait.h"
+#include "perf.h"
+#include <cassert>
+#include <chrono>
+#include <fcntl.h>
+#include <map>
+#include <math.h>
+#include <tuple>
+#include <vector>
 
-namespace RACE{
+namespace RACE
+{
 
 constexpr uint64_t SLOT_PER_BUCKET = 8;
 constexpr uint64_t BUCKET_BITS = 6;
@@ -21,27 +23,29 @@ constexpr uint64_t INIT_DEPTH = 4;
 constexpr uint64_t MAX_DEPTH = 22;
 constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
 
-struct Slot{
-    uint8_t fp:8;
-    uint8_t len:8;
-    uint64_t offset:48;
-}__attribute__((aligned(8)));
+struct Slot
+{
+    uint8_t fp : 8;
+    uint8_t len : 8;
+    uint64_t offset : 48;
+} __attribute__((aligned(8)));
 
-
-struct Slice{
+struct Slice
+{
     uint64_t len;
-    char* data;
+    char *data;
 };
 
-struct KVBlock{
+struct KVBlock
+{
     uint64_t k_len;
     uint64_t v_len;
     char data[0]; //变长数组，用来保证KVBlock空间上的连续性，便于RDMA操作
 };
 
-template<typename Alloc>
-requires Alloc_Trait<Alloc,uint64_t>
-KVBlock* InitKVBlock(Slice *key, Slice *value,Alloc* alloc){
+template <typename Alloc>
+requires Alloc_Trait<Alloc, uint64_t> KVBlock *InitKVBlock(Slice *key, Slice *value, Alloc *alloc)
+{
     KVBlock *kv_block = (KVBlock *)alloc->alloc(2 * sizeof(uint64_t) + key->len + value->len);
     kv_block->k_len = key->len;
     kv_block->v_len = value->len;
@@ -77,10 +81,11 @@ struct Directory
     uint64_t start_cnt;             // 为多客户端同步保留的字段，不影响原有空间布局
 } __attribute__((aligned(8)));
 
-class RACEClient
+class RACEClient : public BasicDB
 {
-public:
-    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id);
+  public:
+    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, uint64_t _machine_id,
+               uint64_t _cli_id, uint64_t _coro_id);
 
     RACEClient(const RACEClient &) = delete;
 
@@ -92,14 +97,15 @@ public:
     task<> reset_remote();
 
     task<> insert(Slice *key, Slice *value);
-    task<std::tuple<uintptr_t,uint64_t>> search(Slice *key, Slice *value); // return slotptr
+    task<std::tuple<uintptr_t, uint64_t>> search(Slice *key, Slice *value); // return slotptr
     task<> update(Slice *key, Slice *value);
     task<> remove(Slice *key);
-    
-private:
+
+  private:
     task<> sync_dir();
-    task<std::tuple<uintptr_t,uint64_t>> search_on_resize(Slice *key, Slice *value);
-    task<bool> search_bucket(Slice* key,Slice *value,uintptr_t& slot_ptr,uint64_t& slot,Bucket* buc_data,uintptr_t bucptr_1,uintptr_t bucptr_2, uint64_t pattern_1);
+    task<std::tuple<uintptr_t, uint64_t>> search_on_resize(Slice *key, Slice *value);
+    task<bool> search_bucket(Slice *key, Slice *value, uintptr_t &slot_ptr, uint64_t &slot, Bucket *buc_data,
+                             uintptr_t bucptr_1, uintptr_t bucptr_2, uint64_t pattern_1);
 
     bool FindLessBucket(Bucket *buc1, Bucket *buc2);
 
@@ -127,20 +133,20 @@ private:
     uint64_t cli_id;
     uint64_t coro_id;
 
-    //Statistic
+    // Statistic
     Perf perf;
 
     // Data part
     Directory *dir;
 };
 
-class RACEServer
+class RACEServer : public BasicDB
 {
-public:
+  public:
     RACEServer(Config &config);
     ~RACEServer();
 
-private:
+  private:
     void Init(Directory *dir);
 
     rdma_dev dev;
@@ -152,4 +158,4 @@ private:
     Directory *dir;
 };
 
-}//namespace RACE
+} // namespace RACE

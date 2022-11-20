@@ -1,9 +1,10 @@
 #include "race_op.h"
 
-namespace RACEOP{
+namespace RACEOP
+{
 inline __attribute__((always_inline)) uint64_t fp(uint64_t pattern)
 {
-    return ((uint64_t)((pattern)>>32)&((1<<8)-1));
+    return ((uint64_t)((pattern) >> 32) & ((1 << 8) - 1));
 }
 
 inline __attribute__((always_inline)) uint64_t get_seg_loc(uint64_t pattern, uint64_t global_depth)
@@ -26,10 +27,10 @@ RACEServer::RACEServer(Config &config) : dev(nullptr, 1, config.roce_flag), ser(
 
     // Init locks
     // memset(lock_mr->addr, 0, lock_mr->length);
-    char tmp[dev_mem_size]={};
-    lock_dm->memcpy_to_dm(lock_dm,0,tmp,dev_mem_size);
+    char tmp[dev_mem_size] = {};
+    lock_dm->memcpy_to_dm(lock_dm, 0, tmp, dev_mem_size);
     log_info("memset");
-    
+
     ser.start_serve();
 }
 
@@ -56,8 +57,8 @@ RACEServer::~RACEServer()
     rdma_free_dmmr({lock_dm, lock_mr});
 }
 
-RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, uint64_t _machine_id,
-                       uint64_t _cli_id, uint64_t _coro_id)
+RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, rdma_conn *_wowait_conn,
+                       uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id)
 {
     // id info
     machine_id = _machine_id;
@@ -67,7 +68,7 @@ RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_con
     // rdma utils
     cli = _cli;
     conn = _conn;
-    // wo_wait_conn = _wo_wait_conn;
+    wo_wait_conn = _wowait_conn;
     lmr = _lmr;
 
     // alloc info
@@ -136,8 +137,8 @@ task<> RACEClient::start(uint64_t total)
     // log_info("Start_cnt:%lu", *start_cnt);
     while ((*start_cnt) < total)
     {
-        co_await conn->read(seg_rmr.raddr + sizeof(Directory) - sizeof(uint64_t), seg_rmr.rkey, start_cnt, sizeof(uint64_t),
-                            lmr->lkey);
+        co_await conn->read(seg_rmr.raddr + sizeof(Directory) - sizeof(uint64_t), seg_rmr.rkey, start_cnt,
+                            sizeof(uint64_t), lmr->lkey);
     }
 }
 
@@ -148,20 +149,22 @@ task<> RACEClient::stop()
     // log_info("Start_cnt:%lu", *start_cnt);
     while ((*start_cnt) != 0)
     {
-        co_await conn->read(seg_rmr.raddr + sizeof(Directory) - sizeof(uint64_t), seg_rmr.rkey, start_cnt, sizeof(uint64_t),
-                            lmr->lkey);
+        co_await conn->read(seg_rmr.raddr + sizeof(Directory) - sizeof(uint64_t), seg_rmr.rkey, start_cnt,
+                            sizeof(uint64_t), lmr->lkey);
     }
 }
 
 task<> RACEClient::sync_dir()
 {
-    co_await conn->read(seg_rmr.raddr + sizeof(uint64_t), seg_rmr.rkey, &dir->global_depth, sizeof(uint64_t), lmr->lkey);
+    co_await conn->read(seg_rmr.raddr + sizeof(uint64_t), seg_rmr.rkey, &dir->global_depth, sizeof(uint64_t),
+                        lmr->lkey);
     co_await conn->read(seg_rmr.raddr + sizeof(uint64_t) * 2, seg_rmr.rkey, dir->segs,
                         (1 << dir->global_depth) * sizeof(DirEntry), lmr->lkey);
 }
 
 task<> RACEClient::insert(Slice *key, Slice *value)
 {
+    op_cnt++;
     perf.StartPerf();
     alloc.ReSet(sizeof(Directory));
     uint64_t pattern_1, pattern_2;
@@ -172,10 +175,13 @@ task<> RACEClient::insert(Slice *key, Slice *value)
     uint64_t kvblock_len = key->len + value->len + sizeof(uint64_t) * 2;
     uint64_t kvblock_ptr = ralloc.alloc(kvblock_len);
     auto wkv = conn->write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey);
+#ifdef WO_WAIT_WRITE
+    auto poll_wowait = (op_cnt == 63) ? wo_wait_conn->write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey)
+                                      : rdma_future{};
+#endif
     uint64_t retry_cnt = 0;
     perf.AddPerf("InitKv");
 Retry:
-    perf.StartPerf();
     alloc.ReSet(sizeof(Directory) + kvblock_len);
     retry_cnt++;
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
@@ -183,9 +189,11 @@ Retry:
     uintptr_t lock_ptr = lock_rmr.raddr + (sizeof(uint64_t)) * (segloc % num_lock);
 
     // lock segment
-    while (co_await conn->cas_n(lock_ptr, lock_rmr.rkey, 0, 1));
+    perf.StartPerf();
+    while (co_await conn->cas_n(lock_ptr, lock_rmr.rkey, 0, 1))
+        ;
     perf.AddPerf("LockSeg");
-    
+
     // read segment
     perf.StartPerf();
     Segment *tmp_segs = (Segment *)alloc.alloc(sizeof(Segment));
@@ -200,10 +208,11 @@ Retry:
 
     // find free slot
     perf.StartPerf();
-    uint64_t slot_id = linear_search_avx_ur((uint64_t*)tmp_segs->slots, SLOT_PER_SEGMENT, 0);
+    uint64_t slot_id = linear_search_avx_ur((uint64_t *)tmp_segs->slots, SLOT_PER_SEGMENT, 0);
     perf.AddPerf("FindSlot");
-    if(slot_id == -1){
-        log_err("[%lu:%lu]No Free Slot for key:%lu",cli_id,coro_id,*(uint64_t*)key->data);
+    if (slot_id == -1)
+    {
+        log_err("[%lu:%lu]No Free Slot for key:%lu", cli_id, coro_id, *(uint64_t *)key->data);
         exit(-1);
         // Split
     }
@@ -214,33 +223,44 @@ Retry:
     tmp->fp = fp(pattern_1);
     tmp->len = kvblock_len;
     tmp->offset = ralloc.offset(kvblock_ptr);
-    if(retry_cnt==1)
+    if (retry_cnt == 1)
         co_await std::move(wkv);
-    conn->pure_write(segptr+sizeof(uint64_t)+slot_id*sizeof(Slot), seg_rmr.rkey, tmp, sizeof(Slot), lmr->lkey);
-    // co_await conn->write(segptr+sizeof(uint64_t)+slot_id*sizeof(Slot), seg_rmr.rkey, tmp, sizeof(Slot), lmr->lkey);
+#ifdef WO_WAIT_WRITE
+    conn->pure_write(segptr + sizeof(uint64_t) + slot_id * sizeof(Slot), seg_rmr.rkey, tmp, sizeof(Slot), lmr->lkey);
+#else
+    co_await conn->write(segptr + sizeof(uint64_t) + slot_id * sizeof(Slot), seg_rmr.rkey, tmp, sizeof(Slot), lmr->lkey);
+#endif
     perf.AddPerf("WriteSlot");
 
     // free segment
-    *tmp = 0 ;
+    *tmp = 0;
     perf.StartPerf();
-    conn->pure_write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t),lmr->lkey);
-    // co_await conn->write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t),lmr->lkey);
+#ifdef WO_WAIT_WRITE
+    conn->pure_write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t), lmr->lkey);
+    if (op_cnt == 63)
+        co_await poll_wowait;
+#else
+    co_await conn->write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t), lmr->lkey);
+#endif
     perf.AddPerf("FreeSeg");
 }
 
-task<int> Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_depth, bool global_flag){
+task<int> Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_depth, bool global_flag)
+{
     co_return 1;
 }
 
-task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *value){
-     uintptr_t slot_ptr;
+task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *value)
+{
+    uintptr_t slot_ptr;
     uint64_t slot;
     uint64_t cnt = 0;
 Retry:
     co_return std::make_tuple(0ull, 0);
 }
 
-task<> RACEClient::update(Slice *key, Slice *value){
+task<> RACEClient::update(Slice *key, Slice *value)
+{
     char data[1024];
     Slice ret_value;
     ret_value.data = data;
@@ -248,29 +268,31 @@ task<> RACEClient::update(Slice *key, Slice *value){
     uint64_t kvblock_len = key->len + value->len + sizeof(uint64_t) * 2;
     uint64_t kvblock_ptr = ralloc.alloc(kvblock_len);
     auto wkv = conn->write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey);
-    
+
     uint64_t pattern_1, pattern_2;
     auto pattern = hash(key->data, key->len);
     pattern_1 = (uint64_t)pattern;
     pattern_2 = (uint64_t)(pattern >> 64);
-    uint64_t cnt = 0 ;
+    uint64_t cnt = 0;
 Retry:
-    alloc.ReSet(sizeof(Directory)+kvblock_len);
+    alloc.ReSet(sizeof(Directory) + kvblock_len);
     // 1st RTT: Using RDMA doorbell batching to fetch two combined buckets
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
     uintptr_t segptr = dir->segs[segloc].seg_ptr;
 
-    if (dir->segs[segloc].split_lock == 1){
+    if (dir->segs[segloc].split_lock == 1)
+    {
         co_await sync_dir();
         goto Retry;
     }
 }
 
-task<> RACEClient::remove(Slice *key){
+task<> RACEClient::remove(Slice *key)
+{
     char data[1024];
     Slice ret_value;
     ret_value.data = data;
-    uint64_t cnt=0;
+    uint64_t cnt = 0;
 Retry:
     alloc.ReSet(sizeof(Directory));
     // 1st RTT: Using RDMA doorbell batching to fetch two combined buckets
@@ -281,11 +303,11 @@ Retry:
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
     uintptr_t segptr = dir->segs[segloc].seg_ptr;
 
-    if (dir->segs[segloc].split_lock == 1){
+    if (dir->segs[segloc].split_lock == 1)
+    {
         co_await sync_dir();
         goto Retry;
     }
 }
 
-
-}// namespace RACEOP
+} // namespace RACEOP

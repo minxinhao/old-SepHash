@@ -5,6 +5,7 @@
 #include "hash.h"
 #include "perf.h"
 #include "search.h"
+#include "kv_trait.h"
 #include <cassert>
 #include <chrono>
 #include <fcntl.h>
@@ -12,6 +13,7 @@
 #include <math.h>
 #include <tuple>
 #include <vector>
+// #define WO_WAIT_WRITE
 
 namespace RACEOP
 {
@@ -86,10 +88,10 @@ struct Directory
     uint64_t start_cnt;             // 为多客户端同步保留的字段，不影响原有空间布局
 } __attribute__((aligned(8)));
 
-class RACEClient
+class RACEClient : public BasicDB
 {
   public:
-    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, uint64_t _machine_id,
+    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, rdma_conn *_wowait_conn, uint64_t _machine_id,
                uint64_t _cli_id, uint64_t _coro_id);
 
     RACEClient(const RACEClient &) = delete;
@@ -141,7 +143,7 @@ class RACEClient
     Directory *dir;
 };
 
-class RACEServer
+class RACEServer : public BasicDB
 {
   public:
     RACEServer(Config &config);

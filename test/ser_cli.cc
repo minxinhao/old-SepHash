@@ -1,5 +1,4 @@
 #include "generator.h"
-#include "kv_trait.h"
 #include "race.h"
 #include "race_op.h"
 #include <set>
@@ -149,7 +148,8 @@ int main(int argc, char *argv[])
         std::vector<ibv_mr *> lmrs(config.num_cli * config.num_coro, nullptr);
         std::vector<rdma_client *> rdma_clis(config.num_cli, nullptr);
         std::vector<rdma_conn *> rdma_conns(config.num_cli, nullptr);
-        std::vector<ClientType *> clis;
+        std::vector<rdma_conn *> rdma_wowait_conns(config.num_cli, nullptr);
+        std::vector<BasicDB *> clis;
         std::thread ths[80];
 
         for (uint64_t i = 0; i < config.num_cli; i++)
@@ -157,12 +157,20 @@ int main(int argc, char *argv[])
             rdma_clis[i] = new rdma_client(dev, so_qp_cap, rdma_default_tempmp_size, config.max_coro, config.cq_size);
             rdma_conns[i] = rdma_clis[i]->connect(config.server_ip);
             assert(rdma_conns[i] != nullptr);
+            rdma_wowait_conns[i] = rdma_clis[i]->connect(config.server_ip);
+            assert(rdma_wowait_conns[i] != nullptr);
             for (uint64_t j = 0; j < config.num_coro; j++)
             {
                 lmrs[i * config.num_coro + j] =
                     dev.create_mr(cbuf_size, mem_buf + cbuf_size * (i * config.num_coro + j));
-                auto cli = new ClientType(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],
+                BasicDB * cli;
+                if(typeid(ClientType) == typeid(RACE::RACEClient)){
+                    cli = new RACE::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],
                                           config.machine_id, i, j);
+                }else if(typeid(ClientType) == typeid(RACEOP::RACEClient)){
+                    cli = new ClientType(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
+                                          config.machine_id, i, j);
+                }
                 clis.push_back(cli);
             }
         }
@@ -175,7 +183,7 @@ int main(int argc, char *argv[])
                 std::vector<task<>> tasks;
                 for (uint64_t j = 0; j < config.num_coro; j++)
                 {
-                    tasks.emplace_back(load(clis[cli_id * config.num_coro + j], cli_id, j));
+                    tasks.emplace_back(load((ClientType*)clis[cli_id * config.num_coro + j], cli_id, j));
                 }
                 rdma_cli->run(gather(std::move(tasks)));
             };
@@ -221,7 +229,7 @@ int main(int argc, char *argv[])
                 for (uint64_t j = 0; j < config.num_coro; j++)
                 {
                     tasks.emplace_back(
-                        run(gens[cli_id * config.num_coro + j], clis[cli_id * config.num_coro + j], cli_id, j));
+                        run(gens[cli_id * config.num_coro + j], (ClientType*)(clis[cli_id * config.num_coro + j]), cli_id, j));
                 }
                 rdma_cli->run(gather(std::move(tasks)));
             };
@@ -245,7 +253,7 @@ int main(int argc, char *argv[])
         // Reset Ser
         if (config.machine_id == 0)
         {
-            rdma_clis[0]->run(clis[0]->reset_remote());
+            rdma_clis[0]->run(((ClientType*)clis[0])->reset_remote());
         }
 
         free(mem_buf);
@@ -256,6 +264,7 @@ int main(int argc, char *argv[])
                 rdma_free_mr(lmrs[i * config.num_coro + j], false);
                 delete clis[i * config.num_coro + j];
             }
+            delete rdma_wowait_conns[i];
             delete rdma_conns[i];
             delete rdma_clis[i];
         }

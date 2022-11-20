@@ -292,6 +292,7 @@ void test_pure_write()
     ibv_mr *lmr = dev.create_mr(mem_size);
     rdma_client *rdma_cli = new rdma_client(dev);
     rdma_conn *conn = rdma_cli->connect("192.168.1.44");
+    rdma_conn *wo_wait_conn = rdma_cli->connect("192.168.1.44");
 
     // write
     uint64_t batch = 100000;
@@ -301,10 +302,13 @@ void test_pure_write()
         uint64_t cnt = 0;
         while (cnt < batch)
         {
-            for (uint64_t i = 0; i < test_num; i++)
-                conn->pure_write((uint64_t)rmr->addr + i * write_len, rmr->rkey, ((char *)lmr->addr) + i * write_len,
+            for (uint64_t i = 0; i < test_num; i++){
+                wo_wait_conn->pure_write((uint64_t)rmr->addr + i * write_len, rmr->rkey, ((char *)lmr->addr) + i * write_len,
                                  write_len, lmr->lkey);
-            co_await conn->write((uint64_t)rmr->addr, rmr->rkey, lmr->addr, write_len, lmr->lkey);
+            }
+                
+            // 必须对同一个connection使用一次co_await才能poll_cq
+            co_await wo_wait_conn->write((uint64_t)rmr->addr, rmr->rkey, lmr->addr, write_len, lmr->lkey);
             cnt++;
         }
     };

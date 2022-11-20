@@ -9,3 +9,6 @@ concept KVTrait = requires(T t,KeyType k,ValueType v) {
     t.update(k,v);
 };
 
+class BasicDB{
+
+};
