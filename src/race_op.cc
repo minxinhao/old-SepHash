@@ -176,7 +176,8 @@ task<> RACEClient::insert(Slice *key, Slice *value)
     uint64_t kvblock_ptr = ralloc.alloc(kvblock_len);
     auto wkv = conn->write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey);
 #ifdef WO_WAIT_WRITE
-    auto poll_wowait = (op_cnt == 63) ? wo_wait_conn->write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey)
+    // poll wo_wait conn every 63 write
+    auto poll_wowait = (op_cnt == 31) ? wo_wait_conn->read(seg_rmr.raddr + sizeof(Directory) - sizeof(uint64_t),seg_rmr.rkey, &dir->start_cnt, sizeof(uint64_t), lmr->lkey)
                                       : rdma_future{};
 #endif
     uint64_t retry_cnt = 0;
@@ -226,9 +227,10 @@ Retry:
     if (retry_cnt == 1)
         co_await std::move(wkv);
 #ifdef WO_WAIT_WRITE
-    conn->pure_write(segptr + sizeof(uint64_t) + slot_id * sizeof(Slot), seg_rmr.rkey, tmp, sizeof(Slot), lmr->lkey);
+    wo_wait_conn->pure_write(segptr + sizeof(uint64_t) + slot_id * sizeof(Slot), seg_rmr.rkey, tmp, sizeof(Slot), lmr->lkey);
 #else
-    co_await conn->write(segptr + sizeof(uint64_t) + slot_id * sizeof(Slot), seg_rmr.rkey, tmp, sizeof(Slot), lmr->lkey);
+    co_await conn->write(segptr + sizeof(uint64_t) + slot_id * sizeof(Slot), seg_rmr.rkey, tmp, sizeof(Slot),
+                         lmr->lkey);
 #endif
     perf.AddPerf("WriteSlot");
 
@@ -236,8 +238,8 @@ Retry:
     *tmp = 0;
     perf.StartPerf();
 #ifdef WO_WAIT_WRITE
-    conn->pure_write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t), lmr->lkey);
-    if (op_cnt == 63)
+    wo_wait_conn->pure_write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t), lmr->lkey);
+    if (op_cnt == 31)
         co_await poll_wowait;
 #else
     co_await conn->write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t), lmr->lkey);
