@@ -74,6 +74,9 @@
         "__tree": "cpp",
         "unordered_set": "cpp",
         "set": "cpp",
-        "numeric": "cpp"
+        "numeric": "cpp",
+        "bitset": "cpp",
+        "fstream": "cpp",
+        "queue": "cpp"
     }
 }

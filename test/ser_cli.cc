@@ -3,7 +3,7 @@
 #include "race_op.h"
 #include <set>
 #include <stdint.h>
-// #define ORDERED_INSERT
+#define ORDERED_INSERT
 Config config;
 uint64_t load_num = 1000;
 using ClientType = RACEOP::RACEClient;
@@ -168,7 +168,7 @@ int main(int argc, char *argv[])
                     cli = new RACE::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],
                                           config.machine_id, i, j);
                 }else if(typeid(ClientType) == typeid(RACEOP::RACEClient)){
-                    cli = new ClientType(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
+                    cli = new RACEOP::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
                                           config.machine_id, i, j);
                 }
                 clis.push_back(cli);

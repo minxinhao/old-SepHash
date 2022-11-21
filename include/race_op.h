@@ -75,16 +75,15 @@ struct Segment
 
 struct DirEntry
 {
-    uint64_t split_lock;
     uintptr_t seg_ptr;
     uint64_t local_depth;
 } __attribute__((aligned(8)));
 
 struct Directory
 {
-    uint64_t resize_lock; //最后位为global-split lock，后续为local-split count
+    // uint64_t resize_lock; 移动到device memory，并放置开头的单独空间，不与其他lock共享空间
     uint64_t global_depth;
-    struct DirEntry segs[DIR_SIZE]; // Directory use MSB and is allocated enough space in advance.
+    DirEntry segs[DIR_SIZE]; // Directory use MSB and is allocated enough space in advance.
     uint64_t start_cnt;             // 为多客户端同步保留的字段，不影响原有空间布局
 } __attribute__((aligned(8)));
 
@@ -111,13 +110,10 @@ class RACEClient : public BasicDB
   private:
     task<> sync_dir();
 
-    task<int> Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_depth, bool global_flag);
+    task<> Split(uint64_t seg_loc, uintptr_t seg_ptr, Segment* old_seg);
 
-    // Global/Local并行的方式造成的等待冲突太高了，就使用简单的单个lock
-    // task<int> LockDir();
-    // task<> UnlockDir();
-    // task<int> SetSlot(uint64_t buc_ptr, uint64_t slot);
-    // task<> MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment *seg, Segment *new_seg);
+    task<int> LockDir();
+    task<> UnlockDir();
 
     // rdma structs
     rdma_client *cli;
