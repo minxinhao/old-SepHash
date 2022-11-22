@@ -47,7 +47,7 @@ void RACEServer::Init()
     for (uint64_t i = 0; i < dir_size; i++)
     {
         tmp = (Segment *)alloc.alloc(sizeof(Segment));
-        log_info("Segment %lu : ptr:%lx", i, (uint64_t)tmp);
+        printf("Segment %lu : ptr:%lx\n", i, (uint64_t)tmp);
         memset(tmp, 0, sizeof(Segment));
         dir->segs[i].seg_ptr = (uintptr_t)tmp;
         dir->segs[i].local_depth = INIT_DEPTH;
@@ -153,7 +153,7 @@ task<> RACEClient::stop()
 {
     uint64_t *start_cnt = (uint64_t *)alloc.alloc(sizeof(uint64_t));
     co_await conn->fetch_add(seg_rmr.raddr + sizeof(Directory) - sizeof(uint64_t), seg_rmr.rkey, *start_cnt, -1);
-    // log_info("Start_cnt:%lu", *start_cnt);
+    // log_err("Start_cnt:%lu", *start_cnt);
     while ((*start_cnt) != 0)
     {
         co_await conn->read(seg_rmr.raddr + sizeof(Directory) - sizeof(uint64_t), seg_rmr.rkey, start_cnt,
@@ -197,7 +197,7 @@ Retry:
     perf.StartPerf();
     while (!co_await conn->cas_n(lock_ptr, lock_rmr.rkey, 0, 1))
     {
-        log_err("[%lu:%lu]Fail to lock seg:%lx for key:%lu", cli_id, coro_id, segloc, *(uint64_t *)key->data);
+        // log_err("[%lu:%lu]Fail to lock seg:%lx for key:%lu", cli_id, coro_id, segloc, *(uint64_t *)key->data);
     }
     perf.AddPerf("LockSeg");
 
@@ -209,11 +209,11 @@ Retry:
 
     if (dir->segs[segloc].local_depth != tmp_segs->local_depth)
     {
-        log_err("[%lu:%lu]Inconsistent remote_depth:%d with local_depth:%ld for key:%lu at segloc:%lx segptr:%lx",
-                cli_id, coro_id, tmp_segs->local_depth, dir->segs[segloc].local_depth, *(uint64_t *)key->data, segloc,
-                segptr);
+        // log_err("[%lu:%lu]Inconsistent remote_depth:%d with local_depth:%ld for key:%lu at segloc:%lx segptr:%lx",
+        //         cli_id, coro_id, tmp_segs->local_depth, dir->segs[segloc].local_depth, *(uint64_t *)key->data, segloc,
+        //         segptr);
         co_await sync_dir();
-        exit(-1);
+        // exit(-1);
 #ifdef WO_WAIT_WRITE
         *tmp = 0;
         wo_wait_conn->pure_write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t), lmr->lkey);
