@@ -11,8 +11,8 @@ then
     --max_coro 256 --cq_size 64 \
     --mem_size 19327352832 
 else
-    for num_cli in `seq 0 0`;do
-        for num_coro in `seq 1 1`;do
+    for num_cli in `seq 0 4`;do
+        for num_coro in `seq 1 4`;do
             echo "num_cli" $((1<<$num_cli)) "num_coro" $num_coro 
             ./ser_cli \
             --server_ip 192.168.1.44 --num_machine 1 --num_cli $((1<<$num_cli)) --num_coro $num_coro \

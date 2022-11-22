@@ -3,9 +3,10 @@
 #include "alloc.h"
 #include "config.h"
 #include "hash.h"
+#include "kv_trait.h"
 #include "perf.h"
 #include "search.h"
-#include "kv_trait.h"
+#include "generator.h" // use xoshiro256pp
 #include <cassert>
 #include <chrono>
 #include <fcntl.h>
@@ -23,8 +24,9 @@ constexpr uint64_t SLOT_PER_SEGMENT = (SEGMENT_SIZE - sizeof(uint64_t)) / (sizeo
 constexpr uint64_t INIT_DEPTH = 4;
 constexpr uint64_t MAX_DEPTH = 22;
 constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
-constexpr uint64_t dev_mem_size = (1 << 10) * 64;              // 64KB的dev mem，用作lock
-constexpr uint64_t num_lock = dev_mem_size / sizeof(uint64_t); // Lock数量，client对seg_id使用hash来共享lock
+constexpr uint64_t dev_mem_size = (1 << 10) * 64; // 64KB的dev mem，用作lock
+constexpr uint64_t num_lock =
+    (dev_mem_size - sizeof(uint64_t)) / sizeof(uint64_t); // Lock数量，client对seg_id使用hash来共享lock
 
 struct Slot
 {
@@ -84,14 +86,14 @@ struct Directory
     // uint64_t resize_lock; 移动到device memory，并放置开头的单独空间，不与其他lock共享空间
     uint64_t global_depth;
     DirEntry segs[DIR_SIZE]; // Directory use MSB and is allocated enough space in advance.
-    uint64_t start_cnt;             // 为多客户端同步保留的字段，不影响原有空间布局
+    uint64_t start_cnt;      // 为多客户端同步保留的字段，不影响原有空间布局
 } __attribute__((aligned(8)));
 
 class RACEClient : public BasicDB
 {
   public:
-    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, rdma_conn *_wowait_conn, uint64_t _machine_id,
-               uint64_t _cli_id, uint64_t _coro_id);
+    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, rdma_conn *_wowait_conn,
+               uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id);
 
     RACEClient(const RACEClient &) = delete;
 
@@ -110,7 +112,7 @@ class RACEClient : public BasicDB
   private:
     task<> sync_dir();
 
-    task<> Split(uint64_t seg_loc, uintptr_t seg_ptr, Segment* old_seg);
+    task<> Split(uint64_t seg_loc, uintptr_t seg_ptr, Segment *old_seg);
 
     task<int> LockDir();
     task<> UnlockDir();

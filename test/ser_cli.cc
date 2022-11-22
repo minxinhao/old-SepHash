@@ -5,7 +5,7 @@
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
-uint64_t load_num = 1000;
+uint64_t load_num = 10000000;
 using ClientType = RACEOP::RACEClient;
 using ServerType = RACEOP::RACEServer;
 using Slice = RACEOP::Slice;

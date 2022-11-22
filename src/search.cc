@@ -16,10 +16,11 @@ int linear_search(const uint64_t *arr, int n, uint64_t key)
     while (i < n)
     {
         if (arr[i] == key)
-            break;
+            return i;
         ++i;
     }
-    return i;
+    return -1;
+    
 }
 
 #define SHUF(i0, i1, i2, i3) (i0 + i1 * 4 + i2 * 16 + i3 * 64)
@@ -144,7 +145,7 @@ int linear_search_avx_ur(const uint64_t *arr, int n, uint64_t key)
     STEP STEP STEP STEP STEP STEP STEP STEP
     STEP STEP STEP STEP STEP STEP STEP STEP
     STEP STEP STEP STEP STEP STEP STEP STEP
-    STEP STEP STEP STEP STEP STEP STEP STEP
+    STEP STEP STEP STEP STEP STEP STEP 
     // STEP STEP STEP STEP STEP STEP STEP STEP
     // STEP STEP STEP STEP STEP STEP STEP STEP
     // STEP STEP STEP STEP STEP STEP STEP STEP

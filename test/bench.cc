@@ -27,7 +27,7 @@ void switch_other_op()
     }
 }
 
-void linear_search_20221113_run(uint64_t *data, uint64_t test_num, search_func func, bool warm_up, bool switch_flag)
+void run_search(uint64_t *data, uint64_t test_num, search_func func, bool warm_up, bool switch_flag)
 {
     // 手动warm up
     // for (uint64_t i = 0; i < 1024*256; i++){
@@ -58,8 +58,9 @@ void test_linear_search(bool warm_up, bool switch_flag)
 {
     auto test = [=](search_func linear_search) {
         int start_num, up_num;
-        start_num = 16;
-        up_num = 128 * 1024;
+        // start_num = 16;
+        // up_num = 128 * 1024;
+        start_num = up_num = 254;
         for (; start_num <= up_num; start_num *= 2)
         {
             if (!warm_up)
@@ -72,7 +73,7 @@ void test_linear_search(bool warm_up, bool switch_flag)
             std::random_device rd;
             std::mt19937 g(rd());
             std::shuffle(data, data + start_num, g);
-            linear_search_20221113_run(data, start_num, linear_search, warm_up, switch_flag);
+            run_search(data, start_num, linear_search, warm_up, switch_flag);
             delete[] data;
             if (switch_flag)
                 switch_other_op();
@@ -329,9 +330,9 @@ void test_pure_write()
 int main()
 {
     // Search
-    // test_linear_search(true, false); // 第一次用来warm up ， 暂时不清楚为啥第一次性能运行这么差
+    test_linear_search(true, false); // 第一次用来warm up ， 暂时不清楚为啥第一次性能运行这么差
     // // switch_other_op(); // 换用无关代码，看是否能warm up
-    // test_linear_search(false, true);
+    test_linear_search(false, false);
 
     // Rdma
     // test_rread();
@@ -342,5 +343,5 @@ int main()
     //         test_cas(i, j);
     //     }
     // }
-    test_pure_write();
+    // test_pure_write();
 }
