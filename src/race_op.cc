@@ -47,7 +47,7 @@ void RACEServer::Init()
     for (uint64_t i = 0; i < dir_size; i++)
     {
         tmp = (Segment *)alloc.alloc(sizeof(Segment));
-        printf("Segment %lu : ptr:%lx\n", i, (uint64_t)tmp);
+        // printf("Segment %lu : ptr:%lx\n", i, (uint64_t)tmp);
         memset(tmp, 0, sizeof(Segment));
         dir->segs[i].seg_ptr = (uintptr_t)tmp;
         dir->segs[i].local_depth = INIT_DEPTH;
@@ -209,11 +209,7 @@ Retry:
 
     if (dir->segs[segloc].local_depth != tmp_segs->local_depth)
     {
-        // log_err("[%lu:%lu]Inconsistent remote_depth:%d with local_depth:%ld for key:%lu at segloc:%lx segptr:%lx",
-        //         cli_id, coro_id, tmp_segs->local_depth, dir->segs[segloc].local_depth, *(uint64_t *)key->data, segloc,
-        //         segptr);
         co_await sync_dir();
-        // exit(-1);
 #ifdef WO_WAIT_WRITE
         *tmp = 0;
         wo_wait_conn->pure_write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t), lmr->lkey);
@@ -390,13 +386,45 @@ task<> RACEClient::UnlockDir()
     co_await conn->cas_n(lock_rmr.raddr, lock_rmr.rkey, 1, 0);
 }
 
-task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *value)
+task<bool> RACEClient::search(Slice *key, Slice *value)
 {
     uintptr_t slot_ptr;
     uint64_t slot;
     uint64_t cnt = 0;
 Retry:
-    co_return std::make_tuple(0ull, 0);
+    alloc.ReSet(sizeof(Directory));
+    // Calculate Segment
+    uint64_t pattern_1 = (uint64_t)hash(key->data, key->len);
+    uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
+    uintptr_t segptr = dir->segs[segloc].seg_ptr;
+
+    // Read Segment
+    Segment* local_seg = (Segment*)alloc.alloc(sizeof(Segment));
+    co_await conn->read(segptr, seg_rmr.rkey, local_seg, sizeof(Segment), lmr->lkey);
+
+    // Check Depth
+    if (dir->segs[segloc].local_depth != local_seg->local_depth){
+        co_await sync_dir();
+        goto Retry;
+    }
+
+    // Find Slot && Read KV
+    for(uint64_t i = 0 ; i < SLOT_PER_SEGMENT ; i++){
+        if (local_seg->slots[i]!=0 && local_seg->slots[i].fp == fp(pattern_1))
+        {
+            KVBlock *kv_block = (KVBlock *)alloc.alloc(local_seg->slots[i].len);
+            co_await conn->read(ralloc.ptr(local_seg->slots[i].offset), seg_rmr.rkey, kv_block, local_seg->slots[i].len, lmr->lkey);
+            if (memcmp(key->data, kv_block->data, key->len) == 0)
+            {
+                slot = *(uint64_t *)&(local_seg->slots[i]);
+                value->len = kv_block->v_len;
+                memcpy(value->data, kv_block->data + kv_block->k_len, value->len);
+                co_return true;
+            }
+        }
+    }
+    log_err("[%lu:%lu]No match key for %lu",cli_id,coro_id,*(uint64_t*)key->data);
+    co_return false;
 }
 
 task<> RACEClient::update(Slice *key, Slice *value)
