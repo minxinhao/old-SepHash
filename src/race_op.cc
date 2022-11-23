@@ -232,7 +232,7 @@ Retry:
     {
         // Split
         perf.AddCnt("SplitCnt");
-        log_err("[%lu:%lu]%s split for key:%lu with local_depth:%u global_depth:%lu at segloc:%lx",cli_id,coro_id,(tmp_segs->local_depth==dir->global_depth)?"gloabl":"local",*(uint64_t*)key->data,tmp_segs->local_depth,dir->global_depth,segloc);
+        // log_err("[%lu:%lu]%s split for key:%lu with local_depth:%u global_depth:%lu at segloc:%lx",cli_id,coro_id,(tmp_segs->local_depth==dir->global_depth)?"gloabl":"local",*(uint64_t*)key->data,tmp_segs->local_depth,dir->global_depth,segloc);
         co_await Split(segloc, segptr, tmp_segs);
         goto Retry;
     }

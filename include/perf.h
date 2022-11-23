@@ -4,7 +4,7 @@
 #include <map>
 #include <string>
 #include <chrono>
-#define USE_PERF
+// #define USE_PERF
 
 struct Perf
 {

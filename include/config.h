@@ -68,7 +68,7 @@ struct Config
             print();
             exit(-1);
         }
-        print();
+        // print();
     }
 
     void print()
