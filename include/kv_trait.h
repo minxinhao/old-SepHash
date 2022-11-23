@@ -10,5 +10,11 @@ concept KVTrait = requires(T t,KeyType k,ValueType v) {
 };
 
 class BasicDB{
+public:
+  BasicDB(){
 
+  }
+  virtual ~BasicDB(){
+
+  }
 };

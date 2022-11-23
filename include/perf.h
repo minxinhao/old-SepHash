@@ -4,8 +4,7 @@
 #include <map>
 #include <string>
 #include <chrono>
-#include "alloc.h"
-// #define USE_PERF
+#define USE_PERF
 
 struct Perf
 {
@@ -17,14 +16,14 @@ struct Perf
     std::vector<std::string> race_perf = {
         "ReadBuc",
         "CalPos",
-        "GetLock", // split sta
+        "GetLock", // Split start
         "InitBuc",
         "EditDir",
         "FreeLock",
-        "ReadOldBuc", //Move Data Sta
+        "ReadOldBuc", //Move Data Start
         "ReadKv",
         "MoveSlot",
-        "UpdateDep", // Move Data End // split e
+        "UpdateDep", // Move Data End // Split End
         "CasSlot",
         "RRead",
         "CheckDuplicate",
@@ -40,11 +39,19 @@ struct Perf
         "InitKv",
         "LockSeg",
         "ReadSeg",
+        "SyncDir",
         "FindSlot",
+        "ReadKv", //Split Start
+        "WriteSeg",
+        "LockDir",
+        "UpdateDir",
+        "FreeDir", //Split End
         "WriteSlot",
         "FreeSeg",
     };
     std::vector<std::string> raceop_cnts = {
+        "SplitCnt", 
+        "SlotCnt",
     };
 
     std::chrono::_V2::steady_clock::time_point start;
@@ -88,14 +95,14 @@ struct Perf
             if(cnts.count(i))
                 printf("%s cnt:%lu\n",i.c_str(),cnts[i]);
         }
-        for(auto i:raceop_perf){
-            if(perfs.count(i))
-                printf("%s cost:%lf\n",i.c_str(),perfs[i]);
-        }
-        for(auto i:raceop_cnts){
-            if(cnts.count(i))
-                printf("%s cost:%lu\n",i.c_str(),cnts[i]);
-        } 
+        // for(auto i:raceop_perf){
+        //     if(perfs.count(i))
+        //         printf("%s cost:%lf\n",i.c_str(),perfs[i]);
+        // }
+        // for(auto i:raceop_cnts){
+        //     if(cnts.count(i))
+        //         printf("%s cnt:%lu\n",i.c_str(),cnts[i]);
+        // } 
 #endif
     }
 

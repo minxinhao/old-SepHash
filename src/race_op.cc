@@ -196,9 +196,7 @@ Retry:
     // lock segment
     perf.StartPerf();
     while (!co_await conn->cas_n(lock_ptr, lock_rmr.rkey, 0, 1))
-    {
-        // log_err("[%lu:%lu]Fail to lock seg:%lx for key:%lu", cli_id, coro_id, segloc, *(uint64_t *)key->data);
-    }
+        ;
     perf.AddPerf("LockSeg");
 
     // read segment
@@ -209,6 +207,7 @@ Retry:
 
     if (dir->segs[segloc].local_depth != tmp_segs->local_depth)
     {
+        perf.StartPerf();
         co_await sync_dir();
 #ifdef WO_WAIT_WRITE
         *tmp = 0;
@@ -219,6 +218,7 @@ Retry:
         *tmp = 0;
         co_await conn->write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t), lmr->lkey);
 #endif
+        perf.AddPerf("SyncDir");
         goto Retry;
     }
 
@@ -227,16 +227,17 @@ Retry:
     uint64_t slot_id = linear_search((uint64_t *)tmp_segs->slots, SLOT_PER_SEGMENT - 1, 0);
     // uint64_t slot_id = linear_search_avx_ur((uint64_t *)tmp_segs->slots, SLOT_PER_SEGMENT - 1, 0);
     perf.AddPerf("FindSlot");
+
     if (slot_id == -1)
     {
-        // log_err("[%lu:%lu]No Free Slot for key:%lx with pattern_1:%lx at segloc:%lx with local_dep:%x global_depth:%lx",
-        //         cli_id, coro_id, *(uint64_t *)key->data, pattern_1, segloc, tmp_segs->local_depth, dir->global_depth);
         // Split
+        perf.AddCnt("SplitCnt");
         co_await Split(segloc, segptr, tmp_segs);
         goto Retry;
     }
 
     // write slot
+    perf.AddCnt("SlotCnt");
     perf.StartPerf();
     tmp->fp = fp(pattern_1);
     tmp->len = kvblock_len;
@@ -279,32 +280,41 @@ task<> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, Segment *old_seg)
     // MoveData
     uint64_t pattern_1, suffix;
     uint64_t slot_off = 0; // offset of free slot in new_seg
+    perf.StartPerf();
     for (uint64_t i = 0; i < SLOT_PER_SEGMENT; i++)
     {
-        perf.StartPerf();
         KVBlock *kv_block = (KVBlock *)alloc.alloc(old_seg->slots[i].len);
         co_await conn->read(ralloc.ptr(old_seg->slots[i].offset), seg_rmr.rkey, kv_block, old_seg->slots[i].len,
                             lmr->lkey);
-        perf.AddPerf("ReadKv");
         auto pattern = hash(kv_block->data, kv_block->k_len);
         pattern_1 = (uint64_t)pattern;
         suffix = (local_depth == dir->global_depth) ? get_seg_loc(pattern_1, dir->global_depth + 1)
-                                                    : get_seg_loc(pattern_1, dir->global_depth );
-        if (check_suffix(suffix, new_seg_loc,local_depth + 1) == 0)
+                                                    : get_seg_loc(pattern_1, dir->global_depth);
+        if (check_suffix(suffix, new_seg_loc, local_depth + 1) == 0)
         {
             local_seg->slots[slot_off++] = old_seg->slots[i];
             old_seg->slots[i] = 0;
         }
     }
+    perf.AddPerf("ReadKv");
+
+    perf.StartPerf();
     local_seg->local_depth = local_depth + 1;
     old_seg->local_depth = local_depth + 1;
     auto w_oldseg = conn->write(seg_ptr, seg_rmr.rkey, old_seg, sizeof(Segment), lmr->lkey);
     auto w_newseg = conn->write(new_seg_ptr, seg_rmr.rkey, local_seg, sizeof(Segment), lmr->lkey);
+    co_await std::move(w_oldseg);
+    co_await std::move(w_newseg);
+    perf.AddPerf("WriteSeg");
+
     // Lock Directory && Edit dir-entry
+    perf.StartPerf();
     while (co_await LockDir())
     {
     }
+    perf.AddPerf("LockDir");
 
+    perf.StartPerf();
     co_await sync_dir(); // 同步一次Dir，来保证之前没有被同步的DirEntry不会被写到远端。
     if (local_depth == dir->global_depth)
     {
@@ -343,8 +353,10 @@ task<> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, Segment *old_seg)
         co_await conn->write(seg_rmr.raddr + sizeof(uint64_t), seg_rmr.rkey, dir->segs,
                              sizeof(DirEntry) * (1ull << dir->global_depth), lmr->lkey);
     }
+    perf.AddPerf("UpdateDir");
 
     // Free Directory Lock && Segment Lock
+    perf.StartPerf();
 #ifdef WO_WAIT_WRITE
     // Free Directory
     uint64_t *tmp = (uint64_t *)alloc.alloc(sizeof(uint64_t));
@@ -362,9 +374,7 @@ task<> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, Segment *old_seg)
     *tmp = 0;
     co_await conn->write(lock_ptr, lock_rmr.rkey, tmp, sizeof(uint64_t), lmr->lkey);
 #endif
-    co_await std::move(w_oldseg);
-    co_await std::move(w_newseg);
-    // log_info("co_await move");
+    perf.AddPerf("FreeDir");
 }
 
 /// @brief 设置Lock为1
@@ -399,21 +409,24 @@ Retry:
     uintptr_t segptr = dir->segs[segloc].seg_ptr;
 
     // Read Segment
-    Segment* local_seg = (Segment*)alloc.alloc(sizeof(Segment));
+    Segment *local_seg = (Segment *)alloc.alloc(sizeof(Segment));
     co_await conn->read(segptr, seg_rmr.rkey, local_seg, sizeof(Segment), lmr->lkey);
 
     // Check Depth
-    if (dir->segs[segloc].local_depth != local_seg->local_depth){
+    if (dir->segs[segloc].local_depth != local_seg->local_depth)
+    {
         co_await sync_dir();
         goto Retry;
     }
 
     // Find Slot && Read KV
-    for(uint64_t i = 0 ; i < SLOT_PER_SEGMENT ; i++){
-        if (local_seg->slots[i]!=0 && local_seg->slots[i].fp == fp(pattern_1))
+    for (uint64_t i = 0; i < SLOT_PER_SEGMENT; i++)
+    {
+        if (local_seg->slots[i] != 0 && local_seg->slots[i].fp == fp(pattern_1))
         {
             KVBlock *kv_block = (KVBlock *)alloc.alloc(local_seg->slots[i].len);
-            co_await conn->read(ralloc.ptr(local_seg->slots[i].offset), seg_rmr.rkey, kv_block, local_seg->slots[i].len, lmr->lkey);
+            co_await conn->read(ralloc.ptr(local_seg->slots[i].offset), seg_rmr.rkey, kv_block, local_seg->slots[i].len,
+                                lmr->lkey);
             if (memcmp(key->data, kv_block->data, key->len) == 0)
             {
                 slot = *(uint64_t *)&(local_seg->slots[i]);
@@ -423,7 +436,7 @@ Retry:
             }
         }
     }
-    log_err("[%lu:%lu]No match key for %lu",cli_id,coro_id,*(uint64_t*)key->data);
+    log_err("[%lu:%lu]No match key for %lu", cli_id, coro_id, *(uint64_t *)key->data);
     co_return false;
 }
 
