@@ -144,7 +144,7 @@ int main(int argc, char *argv[])
     {
         uint64_t cbuf_size = (1ul << 20) * 250;
         char *mem_buf = (char *)malloc(cbuf_size * config.num_cli * config.num_coro);
-        rdma_dev dev(nullptr, 1, config.roce_flag);
+        rdma_dev dev("mlx5_0", 1, config.roce_flag);
         std::vector<ibv_mr *> lmrs(config.num_cli * config.num_coro, nullptr);
         std::vector<rdma_client *> rdma_clis(config.num_cli, nullptr);
         std::vector<rdma_conn *> rdma_conns(config.num_cli, nullptr);

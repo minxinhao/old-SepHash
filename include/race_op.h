@@ -19,9 +19,10 @@
 namespace RACEOP
 {
 
-constexpr uint64_t SEGMENT_SIZE = 2048;
+// constexpr uint64_t SEGMENT_SIZE = 2048;
+constexpr uint64_t SEGMENT_SIZE = 8192;
 constexpr uint64_t SLOT_PER_SEGMENT = (SEGMENT_SIZE - sizeof(uint64_t)) / (sizeof(uint64_t));
-constexpr uint64_t INIT_DEPTH = 4;
+constexpr uint64_t INIT_DEPTH = 16;
 constexpr uint64_t MAX_DEPTH = 22;
 constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
 constexpr uint64_t dev_mem_size = (1 << 10) * 64; // 64KB的dev mem，用作lock

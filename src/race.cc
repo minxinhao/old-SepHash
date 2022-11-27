@@ -55,7 +55,7 @@ void PrintDir(Directory *dir)
     }
 }
 
-RACEServer::RACEServer(Config &config) : dev(nullptr, 1, config.roce_flag), ser(dev)
+RACEServer::RACEServer(Config &config) : dev("mlx5_0", 1, config.roce_flag), ser(dev)
 {
     lmr = dev.reg_mr(233, config.mem_size);
     alloc.Set((char *)lmr->addr, lmr->length);
