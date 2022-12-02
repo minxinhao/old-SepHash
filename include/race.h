@@ -13,13 +13,15 @@
 #include <tuple>
 #include <vector>
 
+#define WO_WAIT_WRITE
+
 namespace RACE
 {
 
 constexpr uint64_t SLOT_PER_BUCKET = 8;
 constexpr uint64_t BUCKET_BITS = 6;
 constexpr uint64_t BUCKET_PER_SEGMENT = 1 << (BUCKET_BITS);
-constexpr uint64_t INIT_DEPTH = 16;
+constexpr uint64_t INIT_DEPTH = 4;
 constexpr uint64_t MAX_DEPTH = 22;
 constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
 
@@ -84,7 +86,7 @@ struct Directory
 class RACEClient : public BasicDB
 {
   public:
-    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, uint64_t _machine_id,
+    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn,rdma_conn *_wowait_conn, uint64_t _machine_id,
                uint64_t _cli_id, uint64_t _coro_id);
 
     RACEClient(const RACEClient &) = delete;
@@ -124,6 +126,7 @@ class RACEClient : public BasicDB
     // rdma structs
     rdma_client *cli;
     rdma_conn *conn;
+    rdma_conn *wowait_conn;
     rdma_rmr rmr;
     struct ibv_mr *lmr;
 

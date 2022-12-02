@@ -90,7 +90,7 @@ RACEServer::~RACEServer()
     rdma_free_mr(lmr);
 }
 
-RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, uint64_t _machine_id,
+RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn,rdma_conn *_wowait_conn, uint64_t _machine_id,
                        uint64_t _cli_id, uint64_t _coro_id)
 {
     // id info
@@ -100,6 +100,7 @@ RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_con
     // rdma utils
     cli = _cli;
     conn = _conn;
+    wowait_conn = _wowait_conn;
     lmr = _lmr;
 
     // alloc info
@@ -194,7 +195,11 @@ task<> RACEClient::insert(Slice *key, Slice *value)
     KVBlock *kv_block = InitKVBlock(key, value, &alloc);
     uint64_t kvblock_len = key->len + value->len + sizeof(uint64_t) * 2;
     uint64_t kvblock_ptr = ralloc.alloc(kvblock_len);
+#ifdef WO_WAIT_WRITE
+    wowait_conn->pure_write(kvblock_ptr, rmr.rkey, kv_block, kvblock_len, lmr->lkey);
+#else
     auto wkv = conn->write(kvblock_ptr, rmr.rkey, kv_block, kvblock_len, lmr->lkey);
+#endif
     uint64_t retry_cnt = 0;
 Retry:
     alloc.ReSet(sizeof(Directory) + kvblock_len);
@@ -218,10 +223,12 @@ Retry:
     auto rbuc2 = conn->read(bucptr_2, rmr.rkey, buc_data + 2, 2 * sizeof(Bucket), lmr->lkey);
     co_await std::move(rbuc2);
     co_await std::move(rbuc1);
+#ifndef WO_WAIT_WRITE
     if (retry_cnt == 1)
     {
         co_await std::move(wkv);
     }
+#endif
 
     if (dir->segs[segloc].local_depth != buc_data->local_depth ||
         dir->segs[segloc].local_depth != (buc_data + 2)->local_depth)
