@@ -303,11 +303,12 @@ void test_pure_write()
         uint64_t cnt = 0;
         while (cnt < batch)
         {
-            for (uint64_t i = 0; i < test_num; i++){
-                wo_wait_conn->pure_write((uint64_t)rmr->addr + i * write_len, rmr->rkey, ((char *)lmr->addr) + i * write_len,
-                                 write_len, lmr->lkey);
+            for (uint64_t i = 0; i < test_num; i++)
+            {
+                wo_wait_conn->pure_write((uint64_t)rmr->addr + i * write_len, rmr->rkey,
+                                         ((char *)lmr->addr) + i * write_len, write_len, lmr->lkey);
             }
-                
+
             // 必须对同一个connection使用一次co_await才能poll_cq
             co_await wo_wait_conn->write((uint64_t)rmr->addr, rmr->rkey, lmr->addr, write_len, lmr->lkey);
             cnt++;
@@ -327,21 +328,118 @@ void test_pure_write()
     rdma_free_mr(rmr);
 }
 
+/// @brief
+/// @param num_cli
+/// @param num_coro
+/// @param op_type : 0:write, 1:read
+void test_rdma_iops(uint64_t num_cli, uint64_t num_coro, uint64_t op_type, uint64_t read_size)
+{
+    // Server
+    rdma_dev dev(nullptr, 1, true);
+    rdma_server ser(dev);
+    ibv_mr *rmr;
+    uint64_t mem_size = (1 << 20) * 100;
+    rmr = dev.reg_mr(233, mem_size);
+    ser.start_serve();
+
+    // Cli
+    uint64_t cbuf_size = (1ul << 20) * 250;
+    char *mem_buf = (char *)malloc(cbuf_size);
+    ibv_mr *lmr = dev.create_mr(cbuf_size, mem_buf);
+    std::vector<rdma_client *> rdma_clis(num_cli, nullptr);
+    std::vector<rdma_conn *> rdma_conns(num_cli, nullptr);
+    std::thread ths[80];
+    for (uint64_t i = 0; i < num_cli; i++)
+    {
+        rdma_clis[i] = new rdma_client(dev, so_qp_cap, rdma_default_tempmp_size);
+        rdma_conns[i] = rdma_clis[i]->connect("192.168.1.44");
+        assert(rdma_conns[i] != nullptr);
+    }
+
+    printf("%s with %lu cli %lu coro\n",op_type ? "read" : "write", num_cli, num_coro);
+    uint64_t num_op = 1000000;
+    auto cli_rmr = rdma_clis[0]->run(rdma_conns[0]->query_remote_mr(233));
+    bool dm_flag = true;
+    bool seq_flag = true;
+    auto test_op = [&](ibv_mr *lmr, rdma_conn *conn, uint64_t cli_id, uint64_t coro_id) -> task<> {
+        for (uint64_t i = 0; i < num_op; i++)
+        {
+            if (!seq_flag)
+            {
+                op_type ? co_await conn->read(cli_rmr.raddr, cli_rmr.rkey, ((char *)lmr->addr) + i * read_size,
+                                              read_size, lmr->lkey)
+                        : co_await conn->write(cli_rmr.raddr, cli_rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey);
+            }
+            else
+            {
+                op_type ? co_await conn->read(cli_rmr.raddr + i * read_size, cli_rmr.rkey,
+                                              ((char *)lmr->addr) + i * read_size, read_size, lmr->lkey)
+                        : co_await conn->write(cli_rmr.raddr + i * read_size, cli_rmr.rkey,
+                                               ((char *)lmr->addr) + i * read_size, read_size, lmr->lkey);
+            }
+        }
+    };
+    auto start = std::chrono::steady_clock::now();
+    for (uint64_t i = 0; i < num_cli; i++)
+    {
+        auto th = [=](rdma_client *rdma_cli, uint64_t cli_id) {
+            std::vector<task<>> tasks;
+            for (uint64_t j = 0; j < num_coro; j++)
+            {
+                tasks.emplace_back(test_op(lmr, rdma_conns[i], i, j));
+            }
+            rdma_cli->run(gather(std::move(tasks)));
+        };
+        ths[i] = std::thread(th, rdma_clis[i], i);
+    }
+    for (uint64_t i = 0; i < num_cli; i++)
+    {
+        ths[i].join();
+    }
+    auto end = std::chrono::steady_clock::now();
+    double op_cnt = 1.0 * num_op * num_cli * num_coro;
+    double duration = std::chrono::duration<double, std::milli>(end - start).count();
+    printf("%s duration:%.2lfms\n", op_type ? "read" : "write", duration);
+    printf("%s IOPS:%.2lfKops\n", op_type ? "read" : "write", op_cnt / duration);
+
+    rdma_free_mr(rmr);
+    free(mem_buf);
+    rdma_free_mr(lmr, false);
+    for (uint64_t i = 0; i < num_cli; i++)
+    {
+        delete rdma_conns[i];
+        delete rdma_clis[i];
+    }
+}
+
 int main()
 {
     // Search
-    test_linear_search(true, false); // 第一次用来warm up ， 暂时不清楚为啥第一次性能运行这么差
+    // test_linear_search(true, false); // 第一次用来warm up ， 暂时不清楚为啥第一次性能运行这么差
     // // switch_other_op(); // 换用无关代码，看是否能warm up
-    test_linear_search(false, false);
+    // test_linear_search(false, false);
 
     // Rdma
     // test_rread();
+    // test cas
     // for (uint64_t i = 1; i <= 16; i *= 2)
     // {
     //     for (uint64_t j = 1; j <= 4; j++)
     //     {
-    //         test_cas(i, j);
+            // test_cas(i, j);
     //     }
     // }
+    // test rdma iops
+    for(uint64_t size = 64 ; size <= (1 << 20) * 16 ; size *= 2)
+    {
+        printf("size:%lu\n", size);
+        for (uint64_t i = 1; i <= 64; i *= 2)
+        {
+            for (uint64_t j = 1; j <= 4; j++)
+            {
+                test_rdma_iops(i, j, 0 , 64);
+            }
+        }  
+    } 
     // test_pure_write();
 }
