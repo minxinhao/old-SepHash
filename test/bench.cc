@@ -356,7 +356,7 @@ void test_rdma_iops(uint64_t num_cli, uint64_t num_coro, uint64_t op_type, uint6
         assert(rdma_conns[i] != nullptr);
     }
 
-    printf("%s with %lu cli %lu coro\n",op_type ? "read" : "write", num_cli, num_coro);
+    printf("%s with %lu cli %lu coro\n", op_type ? "read" : "write", num_cli, num_coro);
     uint64_t num_op = 1000000;
     auto cli_rmr = rdma_clis[0]->run(rdma_conns[0]->query_remote_mr(233));
     bool dm_flag = true;
@@ -366,16 +366,15 @@ void test_rdma_iops(uint64_t num_cli, uint64_t num_coro, uint64_t op_type, uint6
         {
             if (!seq_flag)
             {
-                op_type ? co_await conn->read(cli_rmr.raddr, cli_rmr.rkey, ((char *)lmr->addr) + i * read_size,
-                                              read_size, lmr->lkey)
+                op_type ? co_await conn->read(cli_rmr.raddr, cli_rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey)
                         : co_await conn->write(cli_rmr.raddr, cli_rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey);
             }
             else
             {
-                op_type ? co_await conn->read(cli_rmr.raddr + i * read_size, cli_rmr.rkey,
-                                              ((char *)lmr->addr) + i * read_size, read_size, lmr->lkey)
-                        : co_await conn->write(cli_rmr.raddr + i * read_size, cli_rmr.rkey,
-                                               ((char *)lmr->addr) + i * read_size, read_size, lmr->lkey);
+                op_type ? co_await conn->read(cli_rmr.raddr + (i % 100) * read_size, cli_rmr.rkey,
+                                              ((char *)lmr->addr) + (i % 100) * read_size, read_size, lmr->lkey)
+                        : co_await conn->write(cli_rmr.raddr + (i % 100) * read_size, cli_rmr.rkey,
+                                               ((char *)lmr->addr) + (i % 100) * read_size, read_size, lmr->lkey);
             }
         }
     };
@@ -426,20 +425,29 @@ int main()
     // {
     //     for (uint64_t j = 1; j <= 4; j++)
     //     {
-            // test_cas(i, j);
+    // test_cas(i, j);
     //     }
     // }
     // test rdma iops
-    for(uint64_t size = 64 ; size <= (1 << 20) * 16 ; size *= 2)
+    for (uint64_t size = 64; size <= (1 << 20) * 1; size *= 2)
     {
         printf("size:%lu\n", size);
         for (uint64_t i = 1; i <= 64; i *= 2)
         {
-            for (uint64_t j = 1; j <= 4; j++)
+            for (uint64_t j = 1; j <= 8; j++)
             {
-                test_rdma_iops(i, j, 0 , 64);
+                test_rdma_iops(i, j, 0, size);
+                fflush(stdout);
             }
-        }  
-    } 
+        }
+        // for (uint64_t i = 33; i <= 40; i ++)
+        // {
+        //     for (uint64_t j = 1; j <= 8; j++)
+        //     {
+        //         test_rdma_iops(i, j, 0, size);
+        //         fflush(stdout);
+        //     }
+        // }
+    }
     // test_pure_write();
 }
