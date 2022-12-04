@@ -78,6 +78,7 @@
         "bitset": "cpp",
         "fstream": "cpp",
         "queue": "cpp",
-        "shared_mutex": "cpp"
+        "shared_mutex": "cpp",
+        "ios": "cpp"
     }
 }

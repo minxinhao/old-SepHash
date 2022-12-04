@@ -5,7 +5,7 @@ namespace RACE_SHARE_DIR
 
 inline __attribute__((always_inline)) uint64_t fp(uint64_t pattern)
 {
-    return ((uint64_t)((pattern)>>32)&((1<<8)-1));
+    return ((uint64_t)((pattern) >> 32) & ((1 << 8) - 1));
 }
 
 inline __attribute__((always_inline)) uint64_t get_seg_loc(uint64_t pattern, uint64_t global_depth)
@@ -90,8 +90,9 @@ RACEServer::~RACEServer()
     rdma_free_mr(lmr);
 }
 
-RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn,rdma_conn *_wowait_conn, uint64_t _machine_id,
-                       uint64_t _cli_id, uint64_t _coro_id,std::shared_mutex* _mut,Directory* _dir)
+RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, rdma_conn *_wowait_conn,
+                       uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id, std::atomic_bool *_mut,
+                       std::atomic<uint64_t> *r_cnt, Directory *_dir)
 {
     // id info
     machine_id = _machine_id;
@@ -116,9 +117,10 @@ RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_con
         rbuf_size, rmr.raddr, rmr.rlen);
 
     // sync dir
-    dir_lock = _mut;
+    w_lock = _mut;
+    read_cnt = r_cnt;
     dir = _dir;
-    if(cli_id == 0 && coro_id == 0)
+    if (cli_id == 0 && coro_id == 0)
         cli->run(sync_dir());
 }
 
@@ -186,6 +188,33 @@ task<> RACEClient::stop()
     }
 }
 
+void RACEClient::rlock()
+{
+    while (w_lock->load())
+        ; // wait write end
+    read_cnt->fetch_add(1);
+}
+
+void RACEClient::rfreelock()
+{
+    read_cnt->fetch_add(-1);
+}
+
+void RACEClient::wlock()
+{
+    bool tmp = false;
+    while (w_lock->compare_exchange_strong(tmp, true))
+    {   // wait another write end
+        tmp = false;
+    } 
+    while(read_cnt->load()>0); // wait readers exits
+}
+
+void RACEClient::wfreelock()
+{
+    w_lock->store(false);
+}
+
 task<> RACEClient::insert(Slice *key, Slice *value)
 {
     alloc.ReSet(sizeof(Directory));
@@ -207,10 +236,10 @@ Retry:
     perf.StartPerf();
     retry_cnt++;
     // Read Segment Ptr From CCEH_Cache
-    std::shared_lock<std::shared_mutex> lock(*dir_lock);
+    rlock();
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
     uintptr_t segptr = dir->segs[segloc].seg_ptr;
-    
+
     // Compute two bucket location
     uint64_t bucidx_1, bucidx_2; // calculate bucket idx for each key
     uintptr_t bucptr_1, bucptr_2;
@@ -235,8 +264,8 @@ Retry:
     if (dir->segs[segloc].local_depth != buc_data->local_depth ||
         dir->segs[segloc].local_depth != (buc_data + 2)->local_depth)
     {
+        rfreelock();
         co_await sync_dir();
-        lock.~shared_lock();
         goto Retry;
     }
 
@@ -252,8 +281,9 @@ Retry:
 
     if (slot_ptr == 0ul)
     {
-        // log_err("[%lu:%lu]%s split for key:%lu with local_depth:%u global_depth:%lu at segloc:%lx",cli_id,coro_id,(buc_data->local_depth==dir->global_depth)?"gloabl":"local",*(uint64_t*)key->data,buc_data->local_depth,dir->global_depth,segloc);
-        lock.~shared_lock();
+        // log_err("[%lu:%lu]%s split for key:%lu with local_depth:%u global_depth:%lu at
+        // segloc:%lx",cli_id,coro_id,(buc_data->local_depth==dir->global_depth)?"gloabl":"local",*(uint64_t*)key->data,buc_data->local_depth,dir->global_depth,segloc);
+        rfreelock();
         co_await Split(segloc, segptr, buc->local_depth, buc->local_depth == dir->global_depth);
         goto Retry;
     }
@@ -268,7 +298,7 @@ Retry:
     if (!co_await conn->cas_n(slot_ptr, rmr.rkey, 0, *(uint64_t *)tmp))
     {
         perf.AddPerf("CasSlot");
-        lock.~shared_lock();
+        rfreelock();
         goto Retry;
     }
     perf.AddPerf("CasSlot");
@@ -308,18 +338,22 @@ Retry:
     if (IsCorrectBucket(segloc, buc, pattern_1) == false)
     {
         co_await conn->cas_n(slot_ptr, rmr.rkey, *(uint64_t *)tmp, 0);
+        rfreelock();
         co_await sync_dir();
         perf.AddPerf("IsCorrectBucket");
         goto Retry;
     }
     perf.AddPerf("IsCorrectBucket");
+    rfreelock(); //因为要保证中途不能被修改，所以到此时才能解锁
 }
 
-task<> RACEClient::sync_dir()
+task<> RACEClient::sync_dir(bool lock = true)
 {
+    if(lock) wlock();
     co_await conn->read(rmr.raddr + sizeof(uint64_t), rmr.rkey, &dir->global_depth, sizeof(uint64_t), lmr->lkey);
     co_await conn->read(rmr.raddr + sizeof(uint64_t) * 2, rmr.rkey, dir->segs,
                         (1 << dir->global_depth) * sizeof(DirEntry), lmr->lkey);
+    if(lock) wfreelock();
 }
 
 bool RACEClient::FindLessBucket(Bucket *buc1, Bucket *buc2)
@@ -378,6 +412,7 @@ bool RACEClient::IsCorrectBucket(uint64_t segloc, Bucket *buc, uint64_t pattern)
 
 task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_depth, bool global_flag)
 {
+    wlock();
     perf.StartPerf();
     if (local_depth == MAX_DEPTH)
     {
@@ -386,6 +421,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     }
     if (co_await LockDir())
     {
+        wfreelock();
         co_await sync_dir();
         perf.AddPerf("GetLock");
         co_return 1;
@@ -397,6 +433,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     co_await conn->read(rmr.raddr + sizeof(uint64_t), rmr.rkey, remote_depth, sizeof(uint64_t), lmr->lkey);
     if (*remote_depth != dir->global_depth)
     {
+        wfreelock();
         co_await UnlockDir();
         co_await sync_dir();
         perf.AddPerf("GetLock");
@@ -408,6 +445,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
                         sizeof(DirEntry), lmr->lkey);
     if (remote_entry->local_depth != dir->segs[seg_loc].local_depth)
     {
+        wfreelock();
         co_await UnlockDir();
         co_await sync_dir();
         perf.AddPerf("GetLock");
@@ -415,6 +453,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     }
     if (remote_entry->split_lock == 1)
     {
+        wfreelock();
         co_await UnlockDir();
         co_await sync_dir();
         perf.AddPerf("GetLock");
@@ -441,7 +480,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     // Edit Directory pointer
     /* 因为使用了MSB和提前分配充足空间的Directory，所以可以直接往后增加Directory Entry*/
     perf.StartPerf();
-    co_await sync_dir(); // Global Split必须同步一次Dir，来保证之前没有被同步的DirEntry不会被写到远端。
+    co_await sync_dir(false); // Global Split必须同步一次Dir，来保证之前没有被同步的DirEntry不会被写到远端。
     if (global_flag)
     {
         // Update Old_seg depth
@@ -522,6 +561,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
                                  &(dir->segs[cur_seg_loc].split_lock), sizeof(uint64_t), lmr->lkey);
         }
     }
+    wfreelock();
     co_await UnlockDir();
     perf.AddPerf("FreeLock");
 
@@ -580,7 +620,7 @@ task<> RACEClient::MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment 
                     co_await SetSlot(over_buc_ptr2, *(uint64_t *)(&cur_buc->slots[slot_idx])))
                 {
                     uintptr_t slot_ptr = buc_ptr + sizeof(uint64_t) + sizeof(Slot) * i;
-                    log_err("[%lu:%lu]Fail to move slot_ptr:%lx",cli_id,coro_id,slot_ptr);
+                    log_err("[%lu:%lu]Fail to move slot_ptr:%lx", cli_id, coro_id, slot_ptr);
                     continue;
                 }
 
@@ -691,8 +731,8 @@ task<std::tuple<uintptr_t, uint64_t>> RACEClient::search_on_resize(Slice *key, S
     uint64_t slot;
     uint64_t cnt = 0;
 Retry:
-    if((++cnt)%1000==0)
-        log_err("[%lu:%lu]search_on_resize for key:%lx",cli_id,coro_id,*(uint64_t*)key->data);
+    if ((++cnt) % 1000 == 0)
+        log_err("[%lu:%lu]search_on_resize for key:%lx", cli_id, coro_id, *(uint64_t *)key->data);
     alloc.ReSet(sizeof(Directory));
     co_await sync_dir();
     uint64_t pattern_1, pattern_2;
@@ -764,7 +804,7 @@ task<bool> RACEClient::search_bucket(Slice *key, Slice *value, uintptr_t &slot_p
         buc_ptr = (round / 2 ? bucptr_2 : bucptr_1) + (round % 2 ? sizeof(Bucket) : 0);
         for (uint64_t i = 0; i < SLOT_PER_BUCKET; i++)
         {
-            if (*(uint64_t*)(&buc->slots[i]) && buc->slots[i].fp == fp(pattern_1))
+            if (*(uint64_t *)(&buc->slots[i]) && buc->slots[i].fp == fp(pattern_1))
             {
                 KVBlock *kv_block = (KVBlock *)alloc.alloc(buc->slots[i].len);
                 co_await conn->read(ralloc.ptr(buc->slots[i].offset), rmr.rkey, kv_block, buc->slots[i].len, lmr->lkey);
@@ -787,7 +827,7 @@ task<> RACEClient::remove(Slice *key)
     char data[1024];
     Slice ret_value;
     ret_value.data = data;
-    uint64_t cnt=0;
+    uint64_t cnt = 0;
 Retry:
     alloc.ReSet(sizeof(Directory));
     // 1st RTT: Using RDMA doorbell batching to fetch two combined buckets
@@ -798,7 +838,8 @@ Retry:
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
     uintptr_t segptr = dir->segs[segloc].seg_ptr;
 
-    if (dir->segs[segloc].split_lock == 1){
+    if (dir->segs[segloc].split_lock == 1)
+    {
         co_await sync_dir();
         goto Retry;
     }
@@ -807,18 +848,23 @@ Retry:
     if (slot_ptr != 0ull)
     {
         // if((++cnt)%1000==0)
-        //     log_err("[%lu:%lu]slot_ptr:%lx slot:%lx for %lu to be deleted with pattern_1:%lx",cli_id,coro_id,slot_ptr,slot,*(uint64_t*)key->data,pattern_1);
+        //     log_err("[%lu:%lu]slot_ptr:%lx slot:%lx for %lu to be deleted with
+        //     pattern_1:%lx",cli_id,coro_id,slot_ptr,slot,*(uint64_t*)key->data,pattern_1);
         // 3rd RTT: Setting the key-value block to full zero
-        if (!co_await conn->cas_n(slot_ptr, rmr.rkey, slot , 0)){
-            log_err("[%lu:%lu]fail to cas slot_ptr:%lx for %lu to zero",cli_id,coro_id,slot_ptr,*(uint64_t*)key->data);
+        if (!co_await conn->cas_n(slot_ptr, rmr.rkey, slot, 0))
+        {
+            log_err("[%lu:%lu]fail to cas slot_ptr:%lx for %lu to zero", cli_id, coro_id, slot_ptr,
+                    *(uint64_t *)key->data);
             goto Retry;
         }
-    }else{
-        log_err("[%lu:%lu]No match key for %lu to be deleted",cli_id,coro_id,*(uint64_t*)key->data);
+    }
+    else
+    {
+        log_err("[%lu:%lu]No match key for %lu to be deleted", cli_id, coro_id, *(uint64_t *)key->data);
     }
 }
 
-task<> RACEClient::update(Slice *key,Slice *value)
+task<> RACEClient::update(Slice *key, Slice *value)
 {
     char data[1024];
     Slice ret_value;
@@ -827,19 +873,20 @@ task<> RACEClient::update(Slice *key,Slice *value)
     uint64_t kvblock_len = key->len + value->len + sizeof(uint64_t) * 2;
     uint64_t kvblock_ptr = ralloc.alloc(kvblock_len);
     auto wkv = conn->write(kvblock_ptr, rmr.rkey, kv_block, kvblock_len, lmr->lkey);
-    
+
     uint64_t pattern_1, pattern_2;
     auto pattern = hash(key->data, key->len);
     pattern_1 = (uint64_t)pattern;
     pattern_2 = (uint64_t)(pattern >> 64);
-    uint64_t cnt = 0 ;
+    uint64_t cnt = 0;
 Retry:
-    alloc.ReSet(sizeof(Directory)+kvblock_len);
+    alloc.ReSet(sizeof(Directory) + kvblock_len);
     // 1st RTT: Using RDMA doorbell batching to fetch two combined buckets
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
     uintptr_t segptr = dir->segs[segloc].seg_ptr;
 
-    if (dir->segs[segloc].split_lock == 1){
+    if (dir->segs[segloc].split_lock == 1)
+    {
         co_await sync_dir();
         goto Retry;
     }
@@ -851,14 +898,18 @@ Retry:
     tmp->offset = ralloc.offset(kvblock_ptr);
     if (slot_ptr != 0ull)
     {
-        // log_err("[%lu:%lu]slot_ptr:%lx slot:%lx for %lu to be updated with new slot: fp:%d len:%d offset:%lx",cli_id,coro_id,slot_ptr,slot,*(uint64_t*)key->data,tmp->fp,tmp->len,tmp->offset);
-        if(cnt++==0) co_await std::move(wkv) ;
+        // log_err("[%lu:%lu]slot_ptr:%lx slot:%lx for %lu to be updated with new slot: fp:%d len:%d
+        // offset:%lx",cli_id,coro_id,slot_ptr,slot,*(uint64_t*)key->data,tmp->fp,tmp->len,tmp->offset);
+        if (cnt++ == 0)
+            co_await std::move(wkv);
         // 3rd RTT: Setting the key-value block to full zero
-        if (!co_await conn->cas_n(slot_ptr, rmr.rkey, slot, *(uint64_t*)tmp))
+        if (!co_await conn->cas_n(slot_ptr, rmr.rkey, slot, *(uint64_t *)tmp))
             goto Retry;
-    }else{
-        log_err("[%lu:%lu]No match key for %lu to update",cli_id,coro_id,*(uint64_t*)key->data);
+    }
+    else
+    {
+        log_err("[%lu:%lu]No match key for %lu to update", cli_id, coro_id, *(uint64_t *)key->data);
     }
 }
 
-} // NAMESPACE RACE
+} // namespace RACE_SHARE_DIR

@@ -14,6 +14,7 @@
 #include <vector>
 #include <mutex>
 #include <shared_mutex>
+#include <atomic>
 
 #define WO_WAIT_WRITE
 
@@ -89,7 +90,7 @@ class RACEClient : public BasicDB
 {
   public:
     RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn,rdma_conn *_wowait_conn, uint64_t _machine_id,
-               uint64_t _cli_id, uint64_t _coro_id,std::shared_mutex* mut,Directory* _dir);
+               uint64_t _cli_id, uint64_t _coro_id,std::atomic_bool* w_l,std::atomic<uint64_t>* r_cnt,Directory* _dir);
 
     RACEClient(const RACEClient &) = delete;
 
@@ -106,7 +107,7 @@ class RACEClient : public BasicDB
     task<> remove(Slice *key);
 
   private:
-    task<> sync_dir();
+    task<> sync_dir(bool lock = true);
     task<std::tuple<uintptr_t, uint64_t>> search_on_resize(Slice *key, Slice *value);
     task<bool> search_bucket(Slice *key, Slice *value, uintptr_t &slot_ptr, uint64_t &slot, Bucket *buc_data,
                              uintptr_t bucptr_1, uintptr_t bucptr_2, uint64_t pattern_1);
@@ -125,6 +126,12 @@ class RACEClient : public BasicDB
     task<int> SetSlot(uint64_t buc_ptr, uint64_t slot);
     task<> MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment *seg, Segment *new_seg);
 
+    // For share directory
+    void rlock();
+    void rfreelock();
+    void wlock();
+    void wfreelock();
+
     // rdma structs
     rdma_client *cli;
     rdma_conn *conn;
@@ -142,7 +149,8 @@ class RACEClient : public BasicDB
     Perf perf;
 
     // Data part
-    std::shared_mutex* dir_lock;
+    std::atomic_bool* w_lock;
+    std::atomic<uint64_t>* read_cnt; // C++ share_mutex没有favor write，导致write starvation
     Directory *dir;
 };
 

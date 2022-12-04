@@ -150,8 +150,10 @@ int main(int argc, char *argv[])
         std::vector<rdma_client *> rdma_clis(config.num_cli, nullptr);
         std::vector<rdma_conn *> rdma_conns(config.num_cli, nullptr);
         std::vector<rdma_conn *> rdma_wowait_conns(config.num_cli, nullptr);
-        std::shared_mutex dir_lock;
-        RACE_SHARE_DIR::Directory* dir = (RACE_SHARE_DIR::Directory*)calloc(1,sizeof(RACE_SHARE_DIR::Directory));
+        std::atomic_bool dir_lock{false};
+        std::atomic<uint64_t> read_cnt{0};
+        ibv_mr *dir_mr = dev.create_mr(sizeof(RACE_SHARE_DIR::Directory));
+        RACE_SHARE_DIR::Directory* dir = (RACE_SHARE_DIR::Directory*)dir_mr->addr;
         std::vector<BasicDB *> clis;
         std::thread ths[80];
 
@@ -175,7 +177,7 @@ int main(int argc, char *argv[])
                                           config.machine_id, i, j);
                 }else if(typeid(ClientType) == typeid(RACE_SHARE_DIR::RACEClient)){
                     cli = new RACE_SHARE_DIR::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
-                                          config.machine_id, i, j,&dir_lock,dir);
+                                          config.machine_id, i, j,&dir_lock,&read_cnt,dir);
                 }
                 clis.push_back(cli);
             }
@@ -262,7 +264,7 @@ int main(int argc, char *argv[])
             rdma_clis[0]->run(((ClientType*)clis[0])->reset_remote());
         }
 
-        free(dir);
+        rdma_free_mr(dir_mr);
         free(mem_buf);
         for (uint64_t i = 0; i < config.num_cli; i++)
         {
