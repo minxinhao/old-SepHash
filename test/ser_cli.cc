@@ -2,14 +2,15 @@
 #include "race.h"
 #include "race_op.h"
 #include "race_share_dir.h"
+#include "race_idle.h"
 #include <set>
 #include <stdint.h>
-// #define ORDERED_INSERT
+#define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = RACE::RACEClient;
-using ServerType = RACE::RACEServer;
-using Slice = RACE::Slice;
+using ClientType = RACEIDLE::RACEClient;
+using ServerType = RACEIDLE::RACEServer;
+using Slice = RACEIDLE::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -178,6 +179,9 @@ int main(int argc, char *argv[])
                 }else if(typeid(ClientType) == typeid(RACE_SHARE_DIR::RACEClient)){
                     cli = new RACE_SHARE_DIR::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
                                           config.machine_id, i, j,&dir_lock,&read_cnt,dir);
+                }else if(typeid(ClientType) == typeid(RACEIDLE::RACEClient)){
+                    cli = new RACEIDLE::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
+                                          config.machine_id, i, j);
                 }
                 clis.push_back(cli);
             }
