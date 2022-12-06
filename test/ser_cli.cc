@@ -8,9 +8,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = RACEIDLE::RACEClient;
-using ServerType = RACEIDLE::RACEServer;
-using Slice = RACEIDLE::Slice;
+using ClientType = RACE::RACEClient;
+using ServerType = RACE::RACEServer;
+using Slice = RACE::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -210,7 +210,7 @@ int main(int argc, char *argv[])
         double duration = std::chrono::duration<double, std::milli>(end - start).count();
         printf("Load duration:%.2lfms\n", duration);
         printf("Load IOPS:%.2lfKops\n", op_cnt / duration);
-
+        fflush(stdout);
         printf("Run start\n");
         auto op_per_coro = config.num_op / (config.num_machine * config.num_cli * config.num_coro);
         std::vector<Generator *> gens;
@@ -256,7 +256,8 @@ int main(int argc, char *argv[])
         duration = std::chrono::duration<double, std::milli>(end - start).count();
         printf("Run duration:%.2lfms\n", duration);
         printf("Run IOPS:%.2lfKops\n", op_cnt / duration);
-
+        fflush(stdout);
+        
         for (auto gen : gens)
         {
             delete gen;
