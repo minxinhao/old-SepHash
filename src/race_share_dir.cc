@@ -91,7 +91,7 @@ RACEServer::~RACEServer()
 }
 
 RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, rdma_conn *_wowait_conn,
-                       uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id,ibv_mr *_dir_mr)
+                       uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id,ibv_mr *_dir_mr,std::mutex* _mut)
 {
     // id info
     machine_id = _machine_id;
@@ -115,6 +115,7 @@ RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_con
 
     // sync dir
     dir_mr = _dir_mr;
+    w_dir = _mut;
     dir = (Directory*)dir_mr->addr;
     if (cli_id == 0 && coro_id == 0){
         memset(dir, 0, sizeof(Directory));
@@ -231,10 +232,10 @@ Retry:
     }
 #endif
 
-    log_err("[%lu:%lu] insert :%lu with local_depth:%u global_depth:%lu at segloc:%lx",cli_id,coro_id,*(uint64_t*)key->data,buc_data->local_depth,dir->global_depth,segloc);
     if (dir->segs[segloc].local_depth != buc_data->local_depth ||
         dir->segs[segloc].local_depth != (buc_data + 2)->local_depth)
     {
+        // log_err("[%lu:%lu] inconsistent depth for :%lu with local_depth:%u global_depth:%lu at segloc:%lx",cli_id,coro_id,*(uint64_t*)key->data,buc_data->local_depth,dir->global_depth,segloc);
         co_await sync_dir();
         goto Retry;
     }
@@ -251,8 +252,7 @@ Retry:
 
     if (slot_ptr == 0ul)
     {
-        // log_err("[%lu:%lu]%s split for key:%lu with local_depth:%u global_depth:%lu at
-        // segloc:%lx",cli_id,coro_id,(buc_data->local_depth==dir->global_depth)?"gloabl":"local",*(uint64_t*)key->data,buc_data->local_depth,dir->global_depth,segloc);
+        // log_err("[%lu:%lu]%s split for key:%lu with local_depth:%u global_depth:%lu at segloc:%lx",cli_id,coro_id,(buc_data->local_depth==dir->global_depth)?"gloabl":"local",*(uint64_t*)key->data,buc_data->local_depth,dir->global_depth,segloc);
         co_await Split(segloc, segptr, buc->local_depth, buc->local_depth == dir->global_depth);
         goto Retry;
     }
@@ -315,9 +315,11 @@ Retry:
 
 task<> RACEClient::sync_dir(bool lock)
 {
+    if(lock) w_dir->lock();
     co_await conn->read(rmr.raddr + sizeof(uint64_t), rmr.rkey, &dir->global_depth, sizeof(uint64_t), dir_mr->lkey);
     co_await conn->read(rmr.raddr + sizeof(uint64_t) * 2, rmr.rkey, dir->segs,
                         (1 << dir->global_depth) * sizeof(DirEntry), dir_mr->lkey);
+    if(lock) w_dir->unlock();
 }
 
 bool RACEClient::FindLessBucket(Bucket *buc1, Bucket *buc2)
@@ -376,6 +378,7 @@ bool RACEClient::IsCorrectBucket(uint64_t segloc, Bucket *buc, uint64_t pattern)
 
 task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_depth, bool global_flag)
 {
+    w_dir->lock();
     perf.StartPerf();
     if (local_depth == MAX_DEPTH)
     {
@@ -384,6 +387,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     }
     if (co_await LockDir())
     {
+        w_dir->unlock();
         co_await sync_dir();
         perf.AddPerf("GetLock");
         co_return 1;
@@ -395,6 +399,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     if (*remote_depth != dir->global_depth)
     {
         co_await UnlockDir();
+        w_dir->unlock();
         co_await sync_dir();
         perf.AddPerf("GetLock");
         co_return 1;
@@ -406,12 +411,14 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     if (remote_entry->local_depth != dir->segs[seg_loc].local_depth)
     {
         co_await UnlockDir();
+        w_dir->unlock();
         co_await sync_dir();
         perf.AddPerf("GetLock");
         co_return 1;
     }
     if (remote_entry->split_lock == 1)
     {
+        w_dir->unlock();
         co_await UnlockDir();
         co_await sync_dir();
         perf.AddPerf("GetLock");
@@ -486,6 +493,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
         }
     }
     co_await UnlockDir();
+    w_dir->unlock();
     perf.AddPerf("EditDir");
 
     // Move Data
@@ -494,6 +502,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
 
     // Free Move_Data Lock
     perf.StartPerf();
+    w_dir->lock();
     while (co_await LockDir())
     {
     }
@@ -521,6 +530,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
         }
     }
     co_await UnlockDir();
+    w_dir->unlock();
     perf.AddPerf("FreeLock");
 
     co_return 0;

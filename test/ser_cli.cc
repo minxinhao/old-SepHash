@@ -153,8 +153,7 @@ int main(int argc, char *argv[])
         std::vector<rdma_conn *> rdma_wowait_conns(config.num_cli, nullptr);
         RACE_SHARE_DIR::Directory* dir = (RACE_SHARE_DIR::Directory*)malloc(sizeof(RACE_SHARE_DIR::Directory));
         ibv_mr* dir_mr = dev.create_mr(sizeof(RACE_SHARE_DIR::Directory),dir);
-        std::atomic_bool dir_lock{false};
-        std::atomic<uint64_t> read_cnt{0};
+        std::mutex dir_lock;
         std::vector<BasicDB *> clis;
         std::thread ths[80];
 
@@ -178,7 +177,7 @@ int main(int argc, char *argv[])
                                           config.machine_id, i, j);
                 }else if(typeid(ClientType) == typeid(RACE_SHARE_DIR::RACEClient)){
                     cli = new RACE_SHARE_DIR::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
-                                          config.machine_id, i, j,dir_mr);
+                                          config.machine_id, i, j,dir_mr,&dir_lock);
                 }else if(typeid(ClientType) == typeid(RACEIDLE::RACEClient)){
                     cli = new RACEIDLE::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
                                           config.machine_id, i, j);
