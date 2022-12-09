@@ -3,14 +3,15 @@
 #include "race_op.h"
 #include "race_share_dir.h"
 #include "race_idle.h"
+#include "race_a.h"
 #include <set>
 #include <stdint.h>
-#define ORDERED_INSERT
+// #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = RACE_SHARE_DIR::RACEClient;
-using ServerType = RACE_SHARE_DIR::RACEServer;
-using Slice = RACE_SHARE_DIR::Slice;
+using ClientType = RACEA::RACEClient;
+using ServerType = RACEA::RACEServer;
+using Slice = RACEA::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -180,6 +181,9 @@ int main(int argc, char *argv[])
                                           config.machine_id, i, j,dir_mr,&dir_lock);
                 }else if(typeid(ClientType) == typeid(RACEIDLE::RACEClient)){
                     cli = new RACEIDLE::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
+                                          config.machine_id, i, j);
+                }else if(typeid(ClientType) == typeid(RACEA::RACEClient)){
+                    cli = new RACEA::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
                                           config.machine_id, i, j);
                 }
                 clis.push_back(cli);
