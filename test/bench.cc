@@ -101,7 +101,7 @@ void test_linear_search(bool warm_up, bool switch_flag)
 /// @return
 task<> rread(const char *desc, rdma_conn *conn, ibv_mr *lmr, uint64_t read_size, int op)
 {
-    uint64_t test_num = 10000;
+    uint64_t test_num = 1000000;
     auto rmr = co_await conn->query_remote_mr(233);
     auto start_time = std::chrono::steady_clock::now();
     for (int i = 0; i < test_num; i++)
@@ -111,8 +111,9 @@ task<> rread(const char *desc, rdma_conn *conn, ibv_mr *lmr, uint64_t read_size,
     }
     auto end_time = std::chrono::steady_clock::now();
     double duration = std::chrono::duration<double, std::micro>(end_time - start_time).count();
-    log_info("Read Latency per op %s :%.2lfus", desc, duration / (1.0 * test_num));
-    log_info("%s Load IOPS:%.2lfKops", desc, (1.0 * test_num * 1000) / duration);
+    printf("Read Latency per op %s :%.2lfus\n", desc, duration / (1.0 * test_num));
+    printf("%s Load IOPS:%.2lfKops\n", desc, (1.0 * test_num * 1000) / duration);
+    fflush(stdout);
 }
 
 /// @brief
@@ -124,7 +125,7 @@ task<> rread(const char *desc, rdma_conn *conn, ibv_mr *lmr, uint64_t read_size,
 /// @return
 task<> rread(const char *desc, rdma_conn *conn, ibv_mr *lmr, uint64_t read_size, uint64_t batch_size, int op)
 {
-    uint64_t test_num = 10000;
+    uint64_t test_num = 1000000;
     auto rmr = co_await conn->query_remote_mr(233);
     auto start_time = std::chrono::steady_clock::now();
     for (int i = 0; i < test_num; i++)
@@ -145,8 +146,9 @@ task<> rread(const char *desc, rdma_conn *conn, ibv_mr *lmr, uint64_t read_size,
     }
     auto end_time = std::chrono::steady_clock::now();
     double duration = std::chrono::duration<double, std::micro>(end_time - start_time).count();
-    log_info("Read Latency per op %s :%.2lfus", desc, duration / (1.0 * test_num * batch_size));
-    log_info("%s Load IOPS:%.2lfKops", desc, (1.0 * test_num * batch_size * 1000) / duration);
+    printf("Read Latency per op %s :%.2lfus\n", desc, duration / (1.0 * test_num * batch_size));
+    printf("%s Load IOPS:%.2lfKops\n", desc, (1.0 * test_num * batch_size * 1000) / duration);
+    fflush(stdout);
 }
 
 void test_rread()
@@ -165,17 +167,19 @@ void test_rread()
     rdma_conn *conn = rdma_cli->connect("192.168.1.44");
 
     // Read
-    for (uint64_t read_size = 64; read_size <= (1 << 20) * 16; read_size *= 2)
-    {
-        log_info("read %lu single", read_size);
-        rdma_cli->run(rread("single read", conn, lmr, read_size, 1));
-        log_info("read %lu*4", read_size);
-        rdma_cli->run(rread("batch read", conn, lmr, read_size, 4, 1));
+    for(uint64_t batch_size = 2; batch_size <= 16; batch_size *= 2){
+        for (uint64_t read_size = 64; read_size < (1 << 20) * 1; read_size *= 2)
+        {
+            printf("read %lu single\n", read_size);
+            rdma_cli->run(rread("single read\n", conn, lmr, read_size, 1));
+            printf("read %lu*%lu\n", read_size,batch_size);
+            rdma_cli->run(rread("batch read\n", conn, lmr, read_size, batch_size, 1));
 
-        log_info("write %lu single", read_size);
-        rdma_cli->run(rread("single write", conn, lmr, read_size, 1));
-        log_info("write %lu*4", read_size);
-        rdma_cli->run(rread("batch write", conn, lmr, read_size, 4, 1));
+            printf("write %lu single\n", read_size);
+            rdma_cli->run(rread("single write\n", conn, lmr, read_size, 0));
+            printf("write %lu*%lu\n", read_size,batch_size);
+            rdma_cli->run(rread("batch write\n", conn, lmr, read_size, batch_size, 0));
+        }
     }
 
     delete conn;
@@ -419,7 +423,7 @@ int main()
     // test_linear_search(false, false);
 
     // Rdma
-    // test_rread();
+    test_rread();
     // test cas
     // for (uint64_t i = 1; i <= 16; i *= 2)
     // {
@@ -428,26 +432,27 @@ int main()
     // test_cas(i, j);
     //     }
     // }
+
     // test rdma iops
-    for (uint64_t size = 64; size <= (1 << 20) * 1; size *= 2)
-    {
-        printf("size:%lu\n", size);
-        for (uint64_t i = 1; i <= 64; i *= 2)
-        {
-            for (uint64_t j = 1; j <= 8; j++)
-            {
-                test_rdma_iops(i, j, 0, size);
-                fflush(stdout);
-            }
-        }
-        // for (uint64_t i = 33; i <= 40; i ++)
-        // {
-        //     for (uint64_t j = 1; j <= 8; j++)
-        //     {
-        //         test_rdma_iops(i, j, 0, size);
-        //         fflush(stdout);
-        //     }
-        // }
-    }
+    // for (uint64_t size = 64; size <= (1 << 20) * 1; size *= 2)
+    // {
+    //     printf("size:%lu\n", size);
+    //     for (uint64_t i = 1; i <= 64; i *= 2)
+    //     {
+    //         for (uint64_t j = 1; j <= 8; j++)
+    //         {
+    //             test_rdma_iops(i, j, 0, size);
+    //             fflush(stdout);
+    //         }
+    //     }
+    //     // for (uint64_t i = 33; i <= 40; i ++)
+    //     // {
+    //     //     for (uint64_t j = 1; j <= 8; j++)
+    //     //     {
+    //     //         test_rdma_iops(i, j, 0, size);
+    //     //         fflush(stdout);
+    //     //     }
+    //     // }
+    // }
     // test_pure_write();
 }
