@@ -22,8 +22,8 @@ else
             --machine_id $1  \
             --num_op 1000000 \
             --pattern_type 0 \
-            --insert_frac 1.0 \
-            --read_frac   0.0 \
+            --insert_frac 0.0 \
+            --read_frac   1.0 \
             --update_frac  0.0 \
             --delete_frac  0.0 
         done 

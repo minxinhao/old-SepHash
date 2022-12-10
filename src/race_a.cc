@@ -28,13 +28,13 @@ RACEServer::RACEServer(Config &config) : dev(nullptr, 1, config.roce_flag), ser(
     dir = (Directory *)alloc.alloc(sizeof(Directory));
     memset(dir, 0, sizeof(Directory));
     Init();
-    log_info("init");
+    log_err("init");
 
     // Init locks
     // memset(lock_mr->addr, 0, lock_mr->length);
     char tmp[dev_mem_size] = {};
     lock_dm->memcpy_to_dm(lock_dm, 0, tmp, dev_mem_size);
-    log_info("memset");
+    log_err("memset");
 
     ser.start_serve();
 }
@@ -176,7 +176,7 @@ task<> RACEClient::insert(Slice *key, Slice *value)
     alloc.ReSet(sizeof(Directory));
     uint64_t pattern_1 = (uint64_t)hash(key->data, key->len);
     KVBlock *kv_block = InitKVBlock(key, value, &alloc);
-    uint64_t kvblock_len = key->len + value->len + sizeof(uint64_t) * 2;
+    uint64_t kvblock_len = key->len + value->len + sizeof(uint64_t) * 3;
     uint64_t kvblock_ptr = ralloc.alloc(kvblock_len);
     uint64_t retry_cnt = 0;
     perf.AddPerf("InitKv");
@@ -191,6 +191,7 @@ Retry:
     perf.StartPerf();
     uint64_t *version = (uint64_t *)alloc.alloc(sizeof(uint64_t));
     co_await conn->fetch_add(version_ptr, lock_rmr.rkey, *version, 1);
+    kv_block->version = *version;
     perf.AddPerf("LockSeg");
 
     // read segment
@@ -199,8 +200,10 @@ Retry:
     co_await conn->read(segptr, seg_rmr.rkey, tmp_segs, sizeof(Segment), lmr->lkey);
     perf.AddPerf("ReadSeg");
 
-    // log_err("[%lu:%lu]insert key:%lu with local_depth:%u remote_depth:%lu global_depth:%lu at segloc:%lx with seg_ptr:%lx", cli_id, coro_id,
-                // *(uint64_t *)key->data, tmp_segs->local_depth, dir->segs[segloc].local_depth,dir->global_depth, segloc,segptr);
+    // log_err(
+    //     "[%lu:%lu]insert key:%lu with local_depth:%u remote_depth:%lu global_depth:%lu at segloc:%lx with seg_ptr:%lx",
+    //     cli_id, coro_id, *(uint64_t *)key->data, tmp_segs->local_depth, dir->segs[segloc].local_depth,
+    //     dir->global_depth, segloc, segptr);
     if (dir->segs[segloc].local_depth != tmp_segs->local_depth)
     {
         perf.StartPerf();
@@ -215,14 +218,15 @@ Retry:
     uint64_t slot_id = linear_search((uint64_t *)tmp_segs->slots, SLOT_PER_SEGMENT - 1, 0);
     // uint64_t slot_id = linear_search_avx_ur((uint64_t *)tmp_segs->slots, SLOT_PER_SEGMENT - 1, 0);
     perf.AddPerf("FindSlot");
-    // log_err("[%lu:%lu]insert key:%lu at slot:%lx of segloc:%lx",cli_id,coro_id,*(uint64_t*)key->data,slot_id,segloc);
+    // log_err("[%lu:%lu]insert key:%lu at slot:%lx of segloc:%lx", cli_id, coro_id, *(uint64_t *)key->data, slot_id,
+    //         segloc);
     if (slot_id == -1)
     {
         // Split
         perf.AddCnt("SplitCnt");
         // log_err("[%lu:%lu]%s split for key:%lu with local_depth:%u global_depth:%lu at segloc:%lx", cli_id, coro_id,
-                // (tmp_segs->local_depth == dir->global_depth) ? "gloabl" : "local", *(uint64_t *)key->data,
-                // tmp_segs->local_depth, dir->global_depth, segloc);
+        // (tmp_segs->local_depth == dir->global_depth) ? "gloabl" : "local", *(uint64_t *)key->data,
+        // tmp_segs->local_depth, dir->global_depth, segloc);
         co_await Split(segloc, segptr, tmp_segs);
         goto Retry;
     }
@@ -271,7 +275,7 @@ task<> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, Segment *old_seg)
     uint64_t new_seg_ptr_1 = ralloc.alloc(sizeof(Segment), true); // 按八字节对齐
     uint64_t new_seg_ptr_2 = ralloc.alloc(sizeof(Segment), true); // 按八字节对齐
     uint64_t first_seg_loc = seg_loc & ((1ull << local_depth) - 1);
-    uint64_t new_seg_loc = (1ull << local_depth) | first_seg_loc ;
+    uint64_t new_seg_loc = (1ull << local_depth) | first_seg_loc;
     uint64_t pattern_1;
     uint64_t dep_off = (local_depth) % 4;
     bool dep_bit;
@@ -324,7 +328,7 @@ task<> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, Segment *old_seg)
     {
         // Update Old_seg depth
         // log_err("seg_loc:%lx new_seg_ptr_2:%lx", seg_loc,new_seg_ptr_2);
-         dir->segs[seg_loc].seg_ptr = new_seg_ptr_2;
+        dir->segs[seg_loc].seg_ptr = new_seg_ptr_2;
         dir->segs[seg_loc].local_depth = local_depth + 1;
         co_await conn->write(seg_rmr.raddr + sizeof(uint64_t) + seg_loc * sizeof(DirEntry), seg_rmr.rkey,
                              &dir->segs[seg_loc], sizeof(DirEntry), lmr->lkey);
@@ -393,12 +397,14 @@ task<bool> RACEClient::search(Slice *key, Slice *value)
     uintptr_t slot_ptr;
     uint64_t slot;
     uint64_t cnt = 0;
+    uint64_t pattern_1 = (uint64_t)hash(key->data, key->len);
 Retry:
     alloc.ReSet(sizeof(Directory));
     // Calculate Segment
-    uint64_t pattern_1 = (uint64_t)hash(key->data, key->len);
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
     uintptr_t segptr = dir->segs[segloc].seg_ptr;
+
+    // log_err("[%lu:%lu]search key:%lu at segloc:%lx with seg_ptr:%lx", cli_id, coro_id, *(uint64_t *)key->data, segloc,segptr);
 
     // Read Segment
     Segment *local_seg = (Segment *)alloc.alloc(sizeof(Segment));
@@ -412,21 +418,33 @@ Retry:
     }
 
     // Find Slot && Read KV
+    uint64_t version = UINT64_MAX;
+    uint64_t res_slot = UINT64_MAX;
+    KVBlock *res = nullptr;
     for (uint64_t i = 0; i < SLOT_PER_SEGMENT; i++)
     {
         if (local_seg->slots[i] != 0 && local_seg->slots[i].fp == fp(pattern_1))
         {
-            KVBlock *kv_block = (KVBlock *)alloc.alloc(local_seg->slots[i].len);
-            co_await conn->read(ralloc.ptr(local_seg->slots[i].offset), seg_rmr.rkey, kv_block, local_seg->slots[i].len,
-                                lmr->lkey);
+            KVBlock *kv_block = (KVBlock *)alloc.alloc((local_seg->slots[i].len) * ALIGNED_SIZE);
+            co_await conn->read(ralloc.ptr(local_seg->slots[i].offset), seg_rmr.rkey, kv_block,
+                                (local_seg->slots[i].len) * ALIGNED_SIZE, lmr->lkey);
+            // log_err("read key:%lu key-len:%lu version:%lu value-len:%lu value:%s", *(uint64_t*)kv_block->data, kv_block->k_len,kv_block->version,kv_block->v_len, kv_block->data + kv_block->k_len);
             if (memcmp(key->data, kv_block->data, key->len) == 0)
             {
-                slot = *(uint64_t *)&(local_seg->slots[i]);
-                value->len = kv_block->v_len;
-                memcpy(value->data, kv_block->data + kv_block->k_len, value->len);
-                co_return true;
+                if (kv_block->version > version || version == UINT64_MAX)
+                {
+                    res_slot = i;
+                    version = kv_block->version;
+                    res = kv_block;
+                }
             }
         }
+    }
+    if (res != nullptr && res->v_len != 0)
+    {
+        value->len = res->v_len;
+        memcpy(value->data, res->data + res->k_len, value->len);
+        co_return true;
     }
     log_err("[%lu:%lu]No match key for %lu", cli_id, coro_id, *(uint64_t *)key->data);
     co_return false;

@@ -23,7 +23,7 @@ namespace RACEA
 // constexpr uint64_t SEGMENT_SIZE = 2048;
 constexpr uint64_t SEGMENT_SIZE = 8192;
 constexpr uint64_t SLOT_PER_SEGMENT = (SEGMENT_SIZE - sizeof(uint64_t)) / (sizeof(uint64_t));
-constexpr uint64_t INIT_DEPTH = 4;
+constexpr uint64_t INIT_DEPTH = 16;
 constexpr uint64_t MAX_DEPTH = 22;
 constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
 constexpr uint64_t dev_mem_size = (1 << 10) * 64; // 64KB的dev mem，用作lock
@@ -57,13 +57,14 @@ struct KVBlock
 {
     uint64_t k_len;
     uint64_t v_len;
+    uint64_t version;
     char data[0]; //变长数组，用来保证KVBlock空间上的连续性，便于RDMA操作
 };
 
 template <typename Alloc>
 requires Alloc_Trait<Alloc, uint64_t> KVBlock *InitKVBlock(Slice *key, Slice *value, Alloc *alloc)
 {
-    KVBlock *kv_block = (KVBlock *)alloc->alloc(2 * sizeof(uint64_t) + key->len + value->len);
+    KVBlock *kv_block = (KVBlock *)alloc->alloc(3 * sizeof(uint64_t) + key->len + value->len);
     kv_block->k_len = key->len;
     kv_block->v_len = value->len;
     memcpy(kv_block->data, key->data, key->len);
