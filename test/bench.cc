@@ -10,7 +10,7 @@
 using search_func = int(const uint64_t *, int, uint64_t);
 void switch_other_op()
 {
-    //反复shuffle和sort好了
+    // 反复shuffle和sort好了
     auto start_time = std::chrono::steady_clock::now();
     uint64_t data[128 * 1024];
     uint64_t data_size = 128 * 1024;
@@ -106,8 +106,10 @@ task<> rread(const char *desc, rdma_conn *conn, ibv_mr *lmr, uint64_t read_size,
     auto start_time = std::chrono::steady_clock::now();
     for (int i = 0; i < test_num; i++)
     {
-        op ? co_await conn->read(rmr.raddr, rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey)
-           : co_await conn->write(rmr.raddr, rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey);
+        op ? co_await conn->read(rmr.raddr + (i % 1000) * read_size, rmr.rkey,
+                                 ((char *)lmr->addr) + (i % 1000) * read_size, read_size, lmr->lkey)
+           : co_await conn->write(rmr.raddr + (i % 1000) * read_size, rmr.rkey,
+                                  ((char *)lmr->addr) + (i % 1000) * read_size, read_size, lmr->lkey);
     }
     auto end_time = std::chrono::steady_clock::now();
     double duration = std::chrono::duration<double, std::micro>(end_time - start_time).count();
@@ -133,10 +135,12 @@ task<> rread(const char *desc, rdma_conn *conn, ibv_mr *lmr, uint64_t read_size,
         std::vector<rdma_future> tasks;
         for (int j = 0; j < batch_size; j++)
         {
-            op ? tasks.emplace_back(conn->read(rmr.raddr + j * read_size, rmr.rkey, ((char *)lmr->addr) + j * read_size,
+            op ? tasks.emplace_back(conn->read(rmr.raddr + ((i * batch_size + j) % 1000) * read_size, rmr.rkey,
+                                               ((char *)lmr->addr) + ((i * batch_size + j) % 1000) * read_size,
                                                read_size, lmr->lkey))
-               : tasks.emplace_back(conn->write(rmr.raddr + j * read_size, rmr.rkey,
-                                                ((char *)lmr->addr) + j * read_size, read_size, lmr->lkey));
+               : tasks.emplace_back(conn->write(rmr.raddr + ((i * batch_size + j) % 1000) * read_size, rmr.rkey,
+                                                ((char *)lmr->addr) + ((i * batch_size + j) % 1000) * read_size,
+                                                read_size, lmr->lkey));
         }
         co_await std::move(tasks.back());
         for (size_t i = 0; i < tasks.size() - 1; i++)
@@ -167,18 +171,19 @@ void test_rread()
     rdma_conn *conn = rdma_cli->connect("192.168.1.44");
 
     // Read
-    for(uint64_t batch_size = 2; batch_size <= 16; batch_size *= 2){
+    for (uint64_t batch_size = 2; batch_size <= 16; batch_size *= 2)
+    {
         for (uint64_t read_size = 64; read_size < (1 << 20) * 1; read_size *= 2)
         {
             printf("read %lu single\n", read_size);
             rdma_cli->run(rread("single read\n", conn, lmr, read_size, 1));
-            printf("read %lu*%lu\n", read_size,batch_size);
+            printf("read %lu*%lu\n", read_size, batch_size);
             rdma_cli->run(rread("batch read\n", conn, lmr, read_size, batch_size, 1));
 
-            printf("write %lu single\n", read_size);
-            rdma_cli->run(rread("single write\n", conn, lmr, read_size, 0));
-            printf("write %lu*%lu\n", read_size,batch_size);
-            rdma_cli->run(rread("batch write\n", conn, lmr, read_size, batch_size, 0));
+            // printf("write %lu single\n", read_size);
+            // rdma_cli->run(rread("single write\n", conn, lmr, read_size, 0));
+            // printf("write %lu*%lu\n", read_size,batch_size);
+            // rdma_cli->run(rread("batch write\n", conn, lmr, read_size, batch_size, 0));
         }
     }
 
@@ -336,13 +341,13 @@ void test_pure_write()
 /// @param num_cli
 /// @param num_coro
 /// @param op_type : 0:write, 1:read
-void test_rdma_iops(uint64_t num_cli, uint64_t num_coro, uint64_t op_type, uint64_t read_size)
+void test_rdma_iops(uint64_t num_cli, uint64_t num_coro, uint64_t op_type, uint64_t read_size, uint64_t batch_size)
 {
     // Server
     rdma_dev dev(nullptr, 1, true);
     rdma_server ser(dev);
     ibv_mr *rmr;
-    uint64_t mem_size = (1 << 20) * 100;
+    uint64_t mem_size = (1 << 20) * 250;
     rmr = dev.reg_mr(233, mem_size);
     ser.start_serve();
 
@@ -363,22 +368,34 @@ void test_rdma_iops(uint64_t num_cli, uint64_t num_coro, uint64_t op_type, uint6
     printf("%s with %lu cli %lu coro\n", op_type ? "read" : "write", num_cli, num_coro);
     uint64_t num_op = 1000000;
     auto cli_rmr = rdma_clis[0]->run(rdma_conns[0]->query_remote_mr(233));
-    bool dm_flag = true;
     bool seq_flag = true;
     auto test_op = [&](ibv_mr *lmr, rdma_conn *conn, uint64_t cli_id, uint64_t coro_id) -> task<> {
         for (uint64_t i = 0; i < num_op; i++)
         {
-            if (!seq_flag)
+            std::vector<rdma_future> tasks;
+            for (int j = 0; j < batch_size; j++)
             {
-                op_type ? co_await conn->read(cli_rmr.raddr, cli_rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey)
-                        : co_await conn->write(cli_rmr.raddr, cli_rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey);
+                if (!seq_flag)
+                {
+                    op_type ? tasks.emplace_back(
+                                  conn->read(cli_rmr.raddr, cli_rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey))
+                            : tasks.emplace_back(
+                                  conn->write(cli_rmr.raddr, cli_rmr.rkey, ((char *)lmr->addr), read_size, lmr->lkey));
+                }
+                else
+                {
+                    op_type ? tasks.emplace_back(conn->read(cli_rmr.raddr + ((i + j) % 1000) * read_size, cli_rmr.rkey,
+                                                            ((char *)lmr->addr) + ((i + j) % 1000) * read_size,
+                                                            read_size, lmr->lkey))
+                            : tasks.emplace_back(conn->write(cli_rmr.raddr + ((i + j) % 1000) * read_size, cli_rmr.rkey,
+                                                             ((char *)lmr->addr) + ((i + j) % 1000) * read_size,
+                                                             read_size, lmr->lkey));
+                }
             }
-            else
+            co_await std::move(tasks.back());
+            for (size_t j = 0; j < tasks.size() - 1; j++)
             {
-                op_type ? co_await conn->read(cli_rmr.raddr + (i % 100) * read_size, cli_rmr.rkey,
-                                              ((char *)lmr->addr) + (i % 100) * read_size, read_size, lmr->lkey)
-                        : co_await conn->write(cli_rmr.raddr + (i % 100) * read_size, cli_rmr.rkey,
-                                               ((char *)lmr->addr) + (i % 100) * read_size, read_size, lmr->lkey);
+                co_await std::move(tasks[j]);
             }
         }
     };
@@ -423,7 +440,7 @@ int main()
     // test_linear_search(false, false);
 
     // Rdma
-    test_rread();
+    // test_rread();
     // test cas
     // for (uint64_t i = 1; i <= 16; i *= 2)
     // {
@@ -434,25 +451,20 @@ int main()
     // }
 
     // test rdma iops
-    // for (uint64_t size = 64; size <= (1 << 20) * 1; size *= 2)
-    // {
-    //     printf("size:%lu\n", size);
-    //     for (uint64_t i = 1; i <= 64; i *= 2)
-    //     {
-    //         for (uint64_t j = 1; j <= 8; j++)
-    //         {
-    //             test_rdma_iops(i, j, 0, size);
-    //             fflush(stdout);
-    //         }
-    //     }
-    //     // for (uint64_t i = 33; i <= 40; i ++)
-    //     // {
-    //     //     for (uint64_t j = 1; j <= 8; j++)
-    //     //     {
-    //     //         test_rdma_iops(i, j, 0, size);
-    //     //         fflush(stdout);
-    //     //     }
-    //     // }
-    // }
+    for (uint64_t size = 64; size <= (1 << 20) * 1; size *= 2)
+    {
+        for (uint64_t batch = 2; batch <= 16; batch *= 2)
+        {
+            printf("size:%lu with batch:%lu\n", size, batch);
+            for (uint64_t i = 1; i <= 64; i *= 2)
+            {
+                for (uint64_t j = 1; j <= 8; j++)
+                {
+                    test_rdma_iops(i, j, 1, size, batch);
+                    fflush(stdout);
+                }
+            }
+        }
+    }
     // test_pure_write();
 }
