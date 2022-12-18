@@ -79,6 +79,7 @@
         "fstream": "cpp",
         "queue": "cpp",
         "shared_mutex": "cpp",
-        "ios": "cpp"
+        "ios": "cpp",
+        "cassert": "cpp"
     }
 }

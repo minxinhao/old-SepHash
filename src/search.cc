@@ -1,14 +1,13 @@
 #include "search.h"
-#include <cstring>
-#include <cstdio>
-#include <vector>
-#include <cmath>
-#include <climits>
-#include <immintrin.h>
-#include <cassert>
 #include <algorithm>
+#include <cassert>
+#include <climits>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <immintrin.h>
 #include <mutex>
-#include <avxintrin.h>
+#include <vector>
 
 int linear_search(const uint64_t *arr, int n, uint64_t key)
 {
@@ -20,7 +19,19 @@ int linear_search(const uint64_t *arr, int n, uint64_t key)
         ++i;
     }
     return -1;
-    
+}
+
+int linear_search_bitmask(const uint64_t *arr, int n, uint64_t key, uint64_t bitmask)
+{
+    intptr_t i = 0;
+    while (i < n)
+    {
+        printf("arr:%lx bitmask:%lx key:%lx\n",arr[i],bitmask,key);
+        if ((arr[i] & bitmask) == key)
+            return i;
+        ++i;
+    }
+    return -1;
 }
 
 #define SHUF(i0, i1, i2, i3) (i0 + i1 * 4 + i2 * 16 + i3 * 64)
@@ -128,30 +139,32 @@ int linear_search_avx_16(const uint64_t *arr, int n, uint64_t key)
     return -1;
 }
 
-/// @brief unrolled edtion of avx 
+/// @brief unrolled edtion of avx
 ///         对小于256以下的部分进行直接展开
 int linear_search_avx_ur(const uint64_t *arr, int n, uint64_t key)
 {
     __m256i vkey = _mm256_set1_epi64x(key);
     __m256i cnt = _mm256_setzero_si256();
     intptr_t i = 0;
-    #define STEP \
-    if (i < 256) {\
-        uint32_t mask1 = _mm256_movemask_epi8(_mm256_cmpeq_epi64(vkey, _mm256_loadu_si256((__m256i *)&arr[i+0]))); \
-        uint32_t mask2 = _mm256_movemask_epi8(_mm256_cmpeq_epi64(vkey, _mm256_loadu_si256((__m256i *)&arr[i+4]))); \
-        if (mask1 != 0) return i + __builtin_ctz(mask1) / 8;\
-        if (mask2 != 0) return i + 4 + __builtin_ctz(mask2) / 8;\
-    } i += 8;
-    STEP STEP STEP STEP STEP STEP STEP STEP
-    STEP STEP STEP STEP STEP STEP STEP STEP
-    STEP STEP STEP STEP STEP STEP STEP STEP
-    STEP STEP STEP STEP STEP STEP STEP 
-    // STEP STEP STEP STEP STEP STEP STEP STEP
-    // STEP STEP STEP STEP STEP STEP STEP STEP
-    // STEP STEP STEP STEP STEP STEP STEP STEP
-    // STEP STEP STEP STEP STEP STEP STEP STEP
-    #undef STEP
-    for (; i < n; i++)
+#define STEP                                                                                                           \
+    if (i < 256)                                                                                                       \
+    {                                                                                                                  \
+        uint32_t mask1 = _mm256_movemask_epi8(_mm256_cmpeq_epi64(vkey, _mm256_loadu_si256((__m256i *)&arr[i + 0])));   \
+        uint32_t mask2 = _mm256_movemask_epi8(_mm256_cmpeq_epi64(vkey, _mm256_loadu_si256((__m256i *)&arr[i + 4])));   \
+        if (mask1 != 0)                                                                                                \
+            return i + __builtin_ctz(mask1) / 8;                                                                       \
+        if (mask2 != 0)                                                                                                \
+            return i + 4 + __builtin_ctz(mask2) / 8;                                                                   \
+    }                                                                                                                  \
+    i += 8;
+    STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP STEP
+        STEP STEP STEP STEP STEP STEP STEP STEP
+// STEP STEP STEP STEP STEP STEP STEP STEP
+// STEP STEP STEP STEP STEP STEP STEP STEP
+// STEP STEP STEP STEP STEP STEP STEP STEP
+// STEP STEP STEP STEP STEP STEP STEP STEP
+#undef STEP
+        for (; i < n; i++)
     {
         if (arr[i] == key)
         {
@@ -163,24 +176,24 @@ int linear_search_avx_ur(const uint64_t *arr, int n, uint64_t key)
 }
 
 /// @brief 用来防止avx休眠
-void set_ymm(){
-    int data1 = 0;    
+void set_ymm()
+{
+    int data1 = 0;
     int data2 = 0xffffffff;
     asm volatile("vpbroadcastd %%ebx,%%ymm0\n\t"
-        "vpmovmskb %%ymm0,%%eax"         
-        :"+a"(data1)
-        :"b"(data2)
-        );    
+                 "vpmovmskb %%ymm0,%%eax"
+                 : "+a"(data1)
+                 : "b"(data2));
     // printf("data1:%x\n",data1);
 }
 
-void clr_ymm(){
-    int data1 = 0;    
+void clr_ymm()
+{
+    int data1 = 0;
     int data2 = 0;
     asm("vpbroadcastd %%ebx,%%ymm0\n\t"
-        "vpmovmskb %%ymm0,%%eax"         
-        :"+a"(data1)
-        :"b"(data2)
-        ); 
-    printf("data1:%x\n",data1);
+        "vpmovmskb %%ymm0,%%eax"
+        : "+a"(data1)
+        : "b"(data2));
+    printf("data1:%x\n", data1);
 }

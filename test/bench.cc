@@ -6,6 +6,7 @@
 #include <random>
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 
 using search_func = int(const uint64_t *, int, uint64_t);
 void switch_other_op()
@@ -451,14 +452,14 @@ int main()
     // }
 
     // test rdma iops
-    for (uint64_t size = 64; size <= (1 << 20) * 1; size *= 2)
+    for (uint64_t size = 64; size <= (1 << 10) * 64; size *= 2)
     {
-        for (uint64_t batch = 2; batch <= 16; batch *= 2)
+        for (uint64_t batch = 1; batch <= 16; batch *= 2)
         {
             printf("size:%lu with batch:%lu\n", size, batch);
-            for (uint64_t i = 1; i <= 64; i *= 2)
+            for (uint64_t i = 1; i <= 16; i *= 2)
             {
-                for (uint64_t j = 1; j <= 8; j++)
+                for (uint64_t j = 1; j <= 4; j++)
                 {
                     test_rdma_iops(i, j, 1, size, batch);
                     fflush(stdout);

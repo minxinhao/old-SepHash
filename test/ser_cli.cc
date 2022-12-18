@@ -4,14 +4,15 @@
 #include "race_share_dir.h"
 #include "race_idle.h"
 #include "race_a.h"
+#include "split_hash.h"
 #include <set>
 #include <stdint.h>
-// #define ORDERED_INSERT
+#define ORDERED_INSERT
 Config config;
-uint64_t load_num = 10000000;
-using ClientType = RACEA::RACEClient;
-using ServerType = RACEA::RACEServer;
-using Slice = RACEA::Slice;
+uint64_t load_num = 100;
+using ClientType = SPLIT_HASH::Client;
+using ServerType = SPLIT_HASH::Server;
+using Slice = SPLIT_HASH::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -185,6 +186,9 @@ int main(int argc, char *argv[])
                                           config.machine_id, i, j);
                 }else if(typeid(ClientType) == typeid(RACEA::RACEClient)){
                     cli = new RACEA::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
+                                          config.machine_id, i, j);
+                }else if(typeid(ClientType) == typeid(SPLIT_HASH::Client)){
+                    cli = new SPLIT_HASH::Client(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
                                           config.machine_id, i, j);
                 }
                 clis.push_back(cli);
