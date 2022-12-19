@@ -189,9 +189,9 @@ Retry:
     co_await conn->read(segptr, seg_rmr.rkey, cur_seg, sizeof(CurSeg), lmr->lkey);
     perf.AddPerf("ReadSeg");
 
-    log_err(
-        "[%lu:%lu]insert key:%lu with local_depth:%lu global_depth:%lu at segloc:%lx with seg_ptr:%lx",
-        cli_id, coro_id, *(uint64_t *)key->data, cur_seg->level, dir->global_level, segloc, segptr);
+    // log_err(
+    //     "[%lu:%lu]insert key:%lu with local_depth:%lu global_depth:%lu at segloc:%lx with seg_ptr:%lx",
+    //     cli_id, coro_id, *(uint64_t *)key->data, cur_seg->level, dir->global_level, segloc, segptr);
 
     // Check whether split happened on cur_table
     if (cur_seg->level != dir->global_level)
@@ -207,9 +207,9 @@ Retry:
     sign = sign << 52;
     uint64_t slot_id = linear_search_bitmask((uint64_t *)cur_seg->slots, SLOT_PER_SEG - 1, sign, bitmask);
     perf.AddPerf("FindSlot");
-    log_err(
-        "[%lu:%lu]insert key:%lu at segloc:%lx at slot:%lx for sign:%lx and cur_seg-sign:%d",
-        cli_id, coro_id, *(uint64_t *)key->data, segloc, slot_id,sign,cur_seg->sign);
+    // log_err(
+    //     "[%lu:%lu]insert key:%lu at segloc:%lx at slot:%lx for sign:%lx and cur_seg-sign:%d",
+    //     cli_id, coro_id, *(uint64_t *)key->data, segloc, slot_id,sign,cur_seg->sign);
 
     if(slot_id == -1){
         // Split
@@ -238,7 +238,32 @@ Retry:
 
 task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
 {
-    co_return;
+    perf.StartPerf();
+    uint64_t local_depth = old_seg->level;
+    if (old_seg->level == MAX_LEVEL)
+    {
+        log_err("Exceed MAX_DEPTH");
+        exit(-1);
+    }
+    
+    // 1. Lock Segment && Move Data
+    if (!co_await conn->cas_n(seg_ptr, seg_rmr.rkey, 0, 1))
+    {
+        co_return;
+    }
+    
+    // 1.1 Read Main-Segment Ptr && Read Segment
+    co_await sync_dir();
+    uint64_t main_seg_size = sizeof(MainSeg)+sizeof(Slot)*(1<<dir->segs[seg_loc].local_level);
+    MainSeg* main_seg = (MainSeg*)alloc.alloc(main_seg_size);
+    co_await conn->read(dir->segs[seg_loc].seg_ptr, seg_rmr.rkey, main_seg, sizeof(CurSeg), lmr->lkey);
+
+    // 1.2 sort segment && write
+    MainSeg* new_main_seg = (MainSeg*)alloc.alloc(main_seg_size);
+
+
+    perf.StartPerf();
+
 }
 
 task<int> Client::LockDir(){

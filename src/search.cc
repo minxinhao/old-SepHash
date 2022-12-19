@@ -26,7 +26,6 @@ int linear_search_bitmask(const uint64_t *arr, int n, uint64_t key, uint64_t bit
     intptr_t i = 0;
     while (i < n)
     {
-        printf("arr:%lx bitmask:%lx key:%lx\n",arr[i],bitmask,key);
         if ((arr[i] & bitmask) == key)
             return i;
         ++i;

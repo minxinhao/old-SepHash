@@ -33,10 +33,6 @@ _Z13linear_searchPKmim:
 	.cfi_endproc
 .LFE7864:
 	.size	_Z13linear_searchPKmim, .-_Z13linear_searchPKmim
-	.section	.rodata.str1.1,"aMS",@progbits,1
-.LC0:
-	.string	"arr:%lx bitmask:%lx key:%lx\n"
-	.text
 	.p2align 4
 	.globl	_Z21linear_search_bitmaskPKmimm
 	.type	_Z21linear_search_bitmaskPKmimm, @function
@@ -44,95 +40,36 @@ _Z21linear_search_bitmaskPKmimm:
 .LFB7865:
 	.cfi_startproc
 	endbr64
-	pushq	%r15
-	.cfi_def_cfa_offset 16
-	.cfi_offset 15, -16
-	pushq	%r14
-	.cfi_def_cfa_offset 24
-	.cfi_offset 14, -24
-	movslq	%esi, %r14
-	pushq	%r13
-	.cfi_def_cfa_offset 32
-	.cfi_offset 13, -32
-	pushq	%r12
-	.cfi_def_cfa_offset 40
-	.cfi_offset 12, -40
-	pushq	%rbp
-	.cfi_def_cfa_offset 48
-	.cfi_offset 6, -48
-	pushq	%rbx
-	.cfi_def_cfa_offset 56
-	.cfi_offset 3, -56
-	subq	$8, %rsp
-	.cfi_def_cfa_offset 64
-	testq	%r14, %r14
-	jle	.L12
-	movq	%rdi, %rbp
-	movq	%rdx, %r12
-	movq	%rcx, %r13
-	xorl	%ebx, %ebx
-	leaq	.LC0(%rip), %r15
-	jmp	.L15
+	movslq	%esi, %rsi
+	testq	%rsi, %rsi
+	jle	.L15
+	xorl	%eax, %eax
+	jmp	.L14
 	.p2align 4,,10
 	.p2align 3
-.L13:
-	incq	%rbx
-	cmpq	%r14, %rbx
-	je	.L12
-.L15:
-	movq	0(%rbp,%rbx,8), %rdx
-	movq	%r12, %r8
-	movq	%r13, %rcx
-	movq	%r15, %rsi
-	movl	$1, %edi
-	xorl	%eax, %eax
-	call	__printf_chk@PLT
-	movq	0(%rbp,%rbx,8), %rax
-	andq	%r13, %rax
-	cmpq	%r12, %rax
-	jne	.L13
-	addq	$8, %rsp
-	.cfi_remember_state
-	.cfi_def_cfa_offset 56
-	movl	%ebx, %eax
-	popq	%rbx
-	.cfi_def_cfa_offset 48
-	popq	%rbp
-	.cfi_def_cfa_offset 40
-	popq	%r12
-	.cfi_def_cfa_offset 32
-	popq	%r13
-	.cfi_def_cfa_offset 24
-	popq	%r14
-	.cfi_def_cfa_offset 16
-	popq	%r15
-	.cfi_def_cfa_offset 8
+.L19:
+	incq	%rax
+	cmpq	%rsi, %rax
+	je	.L18
+.L14:
+	movq	(%rdi,%rax,8), %r8
+	andq	%rcx, %r8
+	cmpq	%rdx, %r8
+	jne	.L19
 	ret
 	.p2align 4,,10
 	.p2align 3
-.L12:
-	.cfi_restore_state
-	addq	$8, %rsp
-	.cfi_def_cfa_offset 56
-	popq	%rbx
-	.cfi_def_cfa_offset 48
-	popq	%rbp
-	.cfi_def_cfa_offset 40
-	popq	%r12
-	.cfi_def_cfa_offset 32
-	popq	%r13
-	.cfi_def_cfa_offset 24
-	popq	%r14
-	.cfi_def_cfa_offset 16
+.L18:
 	movl	$-1, %eax
-	popq	%r15
-	.cfi_def_cfa_offset 8
+	ret
+.L15:
+	movl	$-1, %eax
 	ret
 	.cfi_endproc
 .LFE7865:
 	.size	_Z21linear_search_bitmaskPKmimm, .-_Z21linear_search_bitmaskPKmimm
-	.section	.rodata.str1.1
-.LC1:
+	.section	.rodata.str1.1,"aMS",@progbits,1
+.LC0:
 	.string	"%lx  "
 	.text
 	.p2align 4
@@ -151,7 +88,7 @@ _Z9print_256Dv4_x:
 	pushq	%r12
 	.cfi_offset 13, -24
 	.cfi_offset 12, -32
-	leaq	.LC1(%rip), %r12
+	leaq	.LC0(%rip), %r12
 	pushq	%rbx
 	andq	$-32, %rsp
 	subq	$32, %rsp
@@ -160,7 +97,7 @@ _Z9print_256Dv4_x:
 	leaq	32(%rsp), %r13
 	vmovdqa64	%ymm0, (%rsp)
 	vzeroupper
-.L20:
+.L21:
 	movq	(%rbx), %rdx
 	movq	%r12, %rsi
 	movl	$1, %edi
@@ -168,7 +105,7 @@ _Z9print_256Dv4_x:
 	addq	$8, %rbx
 	call	__printf_chk@PLT
 	cmpq	%r13, %rbx
-	jne	.L20
+	jne	.L21
 	movl	$10, %edi
 	call	putchar@PLT
 	leaq	-24(%rbp), %rsp
@@ -196,51 +133,51 @@ _Z17linear_search_avxPKmim:
 	movslq	%r9d, %r9
 	xorl	%eax, %eax
 	testq	%r9, %r9
-	jne	.L24
-	jmp	.L29
+	jne	.L25
+	jmp	.L30
 	.p2align 4,,10
 	.p2align 3
-.L27:
+.L28:
 	testl	%r8d, %r8d
-	jne	.L36
+	jne	.L37
 	addq	$8, %rax
 	cmpq	%rax, %r9
-	jbe	.L29
-.L24:
+	jbe	.L30
+.L25:
 	vpcmpeqq	(%rdi,%rax,8), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %ecx
 	vpcmpeqq	32(%rdi,%rax,8), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %r8d
 	testl	%ecx, %ecx
-	je	.L27
+	je	.L28
 	tzcntl	%ecx, %ecx
 	sarl	$3, %ecx
 	addl	%ecx, %eax
-.L35:
+.L36:
 	vzeroupper
 	ret
 	.p2align 4,,10
 	.p2align 3
-.L29:
+.L30:
 	movslq	%esi, %rsi
 	cmpq	%rsi, %r9
-	jb	.L26
-	jmp	.L37
+	jb	.L27
+	jmp	.L38
 	.p2align 4,,10
 	.p2align 3
-.L30:
+.L31:
 	incq	%r9
 	cmpq	%rsi, %r9
-	jnb	.L38
-.L26:
+	jnb	.L39
+.L27:
 	cmpq	%rdx, (%rdi,%r9,8)
-	jne	.L30
+	jne	.L31
 	movl	%r9d, %eax
 	vzeroupper
 	ret
 	.p2align 4,,10
 	.p2align 3
-.L36:
+.L37:
 	tzcntl	%r8d, %r8d
 	sarl	$3, %r8d
 	leal	4(%r8,%rax), %eax
@@ -248,13 +185,13 @@ _Z17linear_search_avxPKmim:
 	ret
 	.p2align 4,,10
 	.p2align 3
-.L38:
+.L39:
 	movl	$-1, %eax
 	vzeroupper
 	ret
-.L37:
+.L38:
 	movl	$-1, %eax
-	jmp	.L35
+	jmp	.L36
 	.cfi_endproc
 .LFE7867:
 	.size	_Z17linear_search_avxPKmim, .-_Z17linear_search_avxPKmim
@@ -273,21 +210,21 @@ _Z20linear_search_avx_16PKmim:
 	movslq	%r11d, %r11
 	xorl	%eax, %eax
 	testq	%r11, %r11
-	jne	.L40
-	jmp	.L47
+	jne	.L41
+	jmp	.L48
 	.p2align 4,,10
 	.p2align 3
-.L43:
+.L44:
 	testl	%r8d, %r8d
-	jne	.L54
-	testl	%r9d, %r9d
 	jne	.L55
-	testl	%r10d, %r10d
+	testl	%r9d, %r9d
 	jne	.L56
+	testl	%r10d, %r10d
+	jne	.L57
 	addq	$16, %rax
 	cmpq	%rax, %r11
-	jbe	.L47
-.L40:
+	jbe	.L48
+.L41:
 	vpcmpeqq	(%rdi,%rax,8), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %ecx
 	vpcmpeqq	32(%rdi,%rax,8), %ymm1, %ymm0
@@ -297,36 +234,36 @@ _Z20linear_search_avx_16PKmim:
 	vpcmpeqq	96(%rdi,%rax,8), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %r10d
 	testl	%ecx, %ecx
-	je	.L43
+	je	.L44
 	tzcntl	%ecx, %ecx
 	sarl	$3, %ecx
 	addl	%ecx, %eax
-.L53:
+.L54:
 	vzeroupper
 	ret
 	.p2align 4,,10
 	.p2align 3
-.L47:
+.L48:
 	movslq	%esi, %rsi
 	cmpq	%rsi, %r11
-	jb	.L42
+	jb	.L43
 	movl	$-1, %eax
-	jmp	.L53
+	jmp	.L54
 	.p2align 4,,10
 	.p2align 3
-.L48:
+.L49:
 	incq	%r11
 	cmpq	%rsi, %r11
-	jnb	.L57
-.L42:
+	jnb	.L58
+.L43:
 	cmpq	%rdx, (%rdi,%r11,8)
-	jne	.L48
+	jne	.L49
 	movl	%r11d, %eax
 	vzeroupper
 	ret
 	.p2align 4,,10
 	.p2align 3
-.L54:
+.L55:
 	tzcntl	%r8d, %r8d
 	sarl	$3, %r8d
 	leal	4(%r8,%rax), %eax
@@ -334,7 +271,7 @@ _Z20linear_search_avx_16PKmim:
 	ret
 	.p2align 4,,10
 	.p2align 3
-.L55:
+.L56:
 	tzcntl	%r9d, %r9d
 	sarl	$3, %r9d
 	leal	8(%r9,%rax), %eax
@@ -342,7 +279,7 @@ _Z20linear_search_avx_16PKmim:
 	ret
 	.p2align 4,,10
 	.p2align 3
-.L56:
+.L57:
 	tzcntl	%r10d, %r10d
 	sarl	$3, %r10d
 	leal	12(%r10,%rax), %eax
@@ -350,9 +287,9 @@ _Z20linear_search_avx_16PKmim:
 	ret
 	.p2align 4,,10
 	.p2align 3
-.L57:
+.L58:
 	movl	$-1, %eax
-	jmp	.L53
+	jmp	.L54
 	.cfi_endproc
 .LFE7868:
 	.size	_Z20linear_search_avx_16PKmim, .-_Z20linear_search_avx_16PKmim
@@ -367,289 +304,274 @@ _Z20linear_search_avx_urPKmim:
 	vpcmpeqq	(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L126
+	jne	.L127
 	vpcmpeqq	32(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L127
+	jne	.L128
 	vpcmpeqq	64(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L128
+	jne	.L129
 	vpcmpeqq	96(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L129
+	jne	.L130
 	vpcmpeqq	128(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L130
+	jne	.L131
 	vpcmpeqq	160(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L131
+	jne	.L132
 	vpcmpeqq	192(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L132
+	jne	.L133
 	vpcmpeqq	224(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L133
+	jne	.L134
 	vpcmpeqq	256(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L134
+	jne	.L135
 	vpcmpeqq	288(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L135
+	jne	.L136
 	vpcmpeqq	320(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L136
+	jne	.L137
 	vpcmpeqq	352(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L137
+	jne	.L138
 	vpcmpeqq	384(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L138
+	jne	.L139
 	vpcmpeqq	416(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L139
+	jne	.L140
 	vpcmpeqq	448(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L140
+	jne	.L141
 	vpcmpeqq	480(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L141
+	jne	.L142
 	vpcmpeqq	512(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L142
+	jne	.L143
 	vpcmpeqq	544(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L143
+	jne	.L144
 	vpcmpeqq	576(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L144
+	jne	.L145
 	vpcmpeqq	608(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L145
+	jne	.L146
 	vpcmpeqq	640(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L146
+	jne	.L147
 	vpcmpeqq	672(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L147
+	jne	.L148
 	vpcmpeqq	704(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L148
+	jne	.L149
 	vpcmpeqq	736(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L149
+	jne	.L150
 	vpcmpeqq	768(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L150
+	jne	.L151
 	vpcmpeqq	800(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L151
+	jne	.L152
 	vpcmpeqq	832(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L152
+	jne	.L153
 	vpcmpeqq	864(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L153
+	jne	.L154
 	vpcmpeqq	896(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L154
+	jne	.L155
 	vpcmpeqq	928(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L155
+	jne	.L156
 	vpcmpeqq	960(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L156
+	jne	.L157
 	vpcmpeqq	992(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L157
+	jne	.L158
 	vpcmpeqq	1024(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L158
+	jne	.L159
 	vpcmpeqq	1056(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L159
+	jne	.L160
 	vpcmpeqq	1088(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L160
+	jne	.L161
 	vpcmpeqq	1120(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L161
+	jne	.L162
 	vpcmpeqq	1152(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L162
+	jne	.L163
 	vpcmpeqq	1184(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L163
+	jne	.L164
 	vpcmpeqq	1216(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L164
+	jne	.L165
 	vpcmpeqq	1248(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L165
+	jne	.L166
 	vpcmpeqq	1280(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L166
+	jne	.L167
 	vpcmpeqq	1312(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L167
+	jne	.L168
 	vpcmpeqq	1344(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L168
+	jne	.L169
 	vpcmpeqq	1376(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L169
+	jne	.L170
 	vpcmpeqq	1408(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L170
+	jne	.L171
 	vpcmpeqq	1440(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%eax, %eax
-	jne	.L171
+	jne	.L172
 	vpcmpeqq	1472(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %ecx
 	vpcmpeqq	1504(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%ecx, %ecx
-	jne	.L172
-	testl	%eax, %eax
 	jne	.L173
+	testl	%eax, %eax
+	jne	.L174
 	vpcmpeqq	1536(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %ecx
 	vpcmpeqq	1568(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%ecx, %ecx
-	jne	.L174
-	testl	%eax, %eax
 	jne	.L175
+	testl	%eax, %eax
+	jne	.L176
 	vpcmpeqq	1600(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %ecx
 	vpcmpeqq	1632(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%ecx, %ecx
-	jne	.L176
-	testl	%eax, %eax
 	jne	.L177
+	testl	%eax, %eax
+	jne	.L178
 	vpcmpeqq	1664(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %ecx
 	vpcmpeqq	1696(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%ecx, %ecx
-	jne	.L178
-	testl	%eax, %eax
 	jne	.L179
+	testl	%eax, %eax
+	jne	.L180
 	vpcmpeqq	1728(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %ecx
 	vpcmpeqq	1760(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%ecx, %ecx
-	jne	.L180
-	testl	%eax, %eax
 	jne	.L181
+	testl	%eax, %eax
+	jne	.L182
 	vpcmpeqq	1792(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %ecx
 	vpcmpeqq	1824(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%ecx, %ecx
-	jne	.L182
-	testl	%eax, %eax
 	jne	.L183
+	testl	%eax, %eax
+	jne	.L184
 	vpcmpeqq	1856(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %ecx
 	vpcmpeqq	1888(%rdi), %ymm1, %ymm0
 	vpmovmskb	%ymm0, %eax
 	testl	%ecx, %ecx
-	jne	.L184
-	testl	%eax, %eax
 	jne	.L185
+	testl	%eax, %eax
+	jne	.L186
 	vpcmpeqq	1920(%rdi), %ymm1, %ymm0
 	vpcmpeqq	1952(%rdi), %ymm1, %ymm1
 	vpmovmskb	%ymm0, %ecx
 	vpmovmskb	%ymm1, %eax
 	testl	%ecx, %ecx
-	jne	.L186
-	testl	%eax, %eax
 	jne	.L187
+	testl	%eax, %eax
+	jne	.L188
 	movl	$248, %eax
 	movslq	%esi, %rsi
-.L121:
+.L122:
 	cmpq	%rax, %rsi
-	jle	.L124
+	jle	.L125
 	cmpq	%rdx, (%rdi,%rax,8)
-	je	.L125
+	je	.L126
 	incq	%rax
-	jmp	.L121
-	.p2align 4,,10
-	.p2align 3
-.L127:
-	tzcntl	%eax, %eax
-	sarl	$3, %eax
-	addl	$4, %eax
-.L125:
-	vzeroupper
-	ret
-	.p2align 4,,10
-	.p2align 3
-.L126:
-	tzcntl	%eax, %eax
-	sarl	$3, %eax
-	vzeroupper
-	ret
-	.p2align 4,,10
-	.p2align 3
-.L129:
-	tzcntl	%eax, %eax
-	sarl	$3, %eax
-	addl	$12, %eax
-	jmp	.L125
+	jmp	.L122
 	.p2align 4,,10
 	.p2align 3
 .L128:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$8, %eax
+	addl	$4, %eax
+.L126:
+	vzeroupper
+	ret
+	.p2align 4,,10
+	.p2align 3
+.L127:
+	tzcntl	%eax, %eax
+	sarl	$3, %eax
 	vzeroupper
 	ret
 	.p2align 4,,10
@@ -657,312 +579,327 @@ _Z20linear_search_avx_urPKmim:
 .L130:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$16, %eax
-	jmp	.L125
+	addl	$12, %eax
+	jmp	.L126
 	.p2align 4,,10
 	.p2align 3
-.L133:
+.L129:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$28, %eax
-	jmp	.L125
+	addl	$8, %eax
+	vzeroupper
+	ret
 	.p2align 4,,10
 	.p2align 3
 .L131:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$20, %eax
-	jmp	.L125
-	.p2align 4,,10
-	.p2align 3
-.L132:
-	tzcntl	%eax, %eax
-	sarl	$3, %eax
-	addl	$24, %eax
-	jmp	.L125
+	addl	$16, %eax
+	jmp	.L126
 	.p2align 4,,10
 	.p2align 3
 .L134:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$32, %eax
-	jmp	.L125
+	addl	$28, %eax
+	jmp	.L126
+	.p2align 4,,10
+	.p2align 3
+.L132:
+	tzcntl	%eax, %eax
+	sarl	$3, %eax
+	addl	$20, %eax
+	jmp	.L126
+	.p2align 4,,10
+	.p2align 3
+.L133:
+	tzcntl	%eax, %eax
+	sarl	$3, %eax
+	addl	$24, %eax
+	jmp	.L126
+	.p2align 4,,10
+	.p2align 3
 .L135:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$36, %eax
-	jmp	.L125
+	addl	$32, %eax
+	jmp	.L126
 .L136:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$40, %eax
-	jmp	.L125
+	addl	$36, %eax
+	jmp	.L126
 .L137:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$44, %eax
-	jmp	.L125
+	addl	$40, %eax
+	jmp	.L126
 .L138:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$48, %eax
-	jmp	.L125
+	addl	$44, %eax
+	jmp	.L126
 .L139:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$52, %eax
-	jmp	.L125
+	addl	$48, %eax
+	jmp	.L126
 .L140:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$56, %eax
-	jmp	.L125
+	addl	$52, %eax
+	jmp	.L126
 .L141:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$60, %eax
-	jmp	.L125
+	addl	$56, %eax
+	jmp	.L126
 .L142:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$64, %eax
-	jmp	.L125
+	addl	$60, %eax
+	jmp	.L126
 .L143:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$68, %eax
-	jmp	.L125
+	addl	$64, %eax
+	jmp	.L126
 .L144:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$72, %eax
-	jmp	.L125
+	addl	$68, %eax
+	jmp	.L126
 .L145:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
-	addl	$76, %eax
-	jmp	.L125
-.L147:
-	tzcntl	%eax, %eax
-	sarl	$3, %eax
-	addl	$84, %eax
-	jmp	.L125
+	addl	$72, %eax
+	jmp	.L126
 .L146:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
+	addl	$76, %eax
+	jmp	.L126
+.L148:
+	tzcntl	%eax, %eax
+	sarl	$3, %eax
+	addl	$84, %eax
+	jmp	.L126
+.L147:
+	tzcntl	%eax, %eax
+	sarl	$3, %eax
 	addl	$80, %eax
-	jmp	.L125
-.L124:
+	jmp	.L126
+.L125:
 	orl	$-1, %eax
-	jmp	.L125
-.L187:
+	jmp	.L126
+.L188:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$244, %eax
-	jmp	.L125
-.L186:
+	jmp	.L126
+.L187:
 	xorl	%eax, %eax
 	tzcntl	%ecx, %eax
 	sarl	$3, %eax
 	addl	$240, %eax
-	jmp	.L125
-.L185:
+	jmp	.L126
+.L186:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$236, %eax
-	jmp	.L125
-.L184:
+	jmp	.L126
+.L185:
 	xorl	%eax, %eax
 	tzcntl	%ecx, %eax
 	sarl	$3, %eax
 	addl	$232, %eax
-	jmp	.L125
-.L183:
+	jmp	.L126
+.L184:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$228, %eax
-	jmp	.L125
-.L182:
+	jmp	.L126
+.L183:
 	xorl	%eax, %eax
 	tzcntl	%ecx, %eax
 	sarl	$3, %eax
 	addl	$224, %eax
-	jmp	.L125
-.L181:
+	jmp	.L126
+.L182:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$220, %eax
-	jmp	.L125
-.L180:
+	jmp	.L126
+.L181:
 	xorl	%eax, %eax
 	tzcntl	%ecx, %eax
 	sarl	$3, %eax
 	addl	$216, %eax
-	jmp	.L125
-.L179:
+	jmp	.L126
+.L180:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$212, %eax
-	jmp	.L125
-.L178:
+	jmp	.L126
+.L179:
 	xorl	%eax, %eax
 	tzcntl	%ecx, %eax
 	sarl	$3, %eax
 	addl	$208, %eax
-	jmp	.L125
-.L177:
+	jmp	.L126
+.L178:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$204, %eax
-	jmp	.L125
-.L176:
+	jmp	.L126
+.L177:
 	xorl	%eax, %eax
 	tzcntl	%ecx, %eax
 	sarl	$3, %eax
 	addl	$200, %eax
-	jmp	.L125
-.L175:
+	jmp	.L126
+.L176:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$196, %eax
-	jmp	.L125
-.L174:
+	jmp	.L126
+.L175:
 	xorl	%eax, %eax
 	tzcntl	%ecx, %eax
 	sarl	$3, %eax
 	addl	$192, %eax
-	jmp	.L125
-.L173:
+	jmp	.L126
+.L174:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$188, %eax
-	jmp	.L125
-.L172:
+	jmp	.L126
+.L173:
 	xorl	%eax, %eax
 	tzcntl	%ecx, %eax
 	sarl	$3, %eax
 	addl	$184, %eax
-	jmp	.L125
-.L171:
+	jmp	.L126
+.L172:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$180, %eax
-	jmp	.L125
-.L170:
+	jmp	.L126
+.L171:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$176, %eax
-	jmp	.L125
-.L169:
+	jmp	.L126
+.L170:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$172, %eax
-	jmp	.L125
-.L168:
+	jmp	.L126
+.L169:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$168, %eax
-	jmp	.L125
-.L167:
+	jmp	.L126
+.L168:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$164, %eax
-	jmp	.L125
-.L166:
+	jmp	.L126
+.L167:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$160, %eax
-	jmp	.L125
-.L165:
+	jmp	.L126
+.L166:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$156, %eax
-	jmp	.L125
-.L164:
+	jmp	.L126
+.L165:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$152, %eax
-	jmp	.L125
-.L163:
+	jmp	.L126
+.L164:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$148, %eax
-	jmp	.L125
-.L162:
+	jmp	.L126
+.L163:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$144, %eax
-	jmp	.L125
-.L161:
+	jmp	.L126
+.L162:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$140, %eax
-	jmp	.L125
-.L160:
+	jmp	.L126
+.L161:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$136, %eax
-	jmp	.L125
-.L159:
+	jmp	.L126
+.L160:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$132, %eax
-	jmp	.L125
-.L158:
+	jmp	.L126
+.L159:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	subl	$-128, %eax
-	jmp	.L125
-.L157:
+	jmp	.L126
+.L158:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$124, %eax
-	jmp	.L125
-.L156:
+	jmp	.L126
+.L157:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$120, %eax
-	jmp	.L125
-.L155:
+	jmp	.L126
+.L156:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$116, %eax
-	jmp	.L125
-.L154:
+	jmp	.L126
+.L155:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$112, %eax
-	jmp	.L125
-.L153:
+	jmp	.L126
+.L154:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$108, %eax
-	jmp	.L125
-.L152:
+	jmp	.L126
+.L153:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$104, %eax
-	jmp	.L125
-.L151:
+	jmp	.L126
+.L152:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$100, %eax
-	jmp	.L125
-.L150:
+	jmp	.L126
+.L151:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$96, %eax
-	jmp	.L125
-.L149:
+	jmp	.L126
+.L150:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$92, %eax
-	jmp	.L125
-.L148:
+	jmp	.L126
+.L149:
 	tzcntl	%eax, %eax
 	sarl	$3, %eax
 	addl	$88, %eax
-	jmp	.L125
+	jmp	.L126
 	.cfi_endproc
 .LFE7869:
 	.size	_Z20linear_search_avx_urPKmim, .-_Z20linear_search_avx_urPKmim
@@ -979,7 +916,7 @@ _Z7set_ymmv:
 	xorl	%eax, %eax
 	movl	$-1, %ebx
 #APP
-# 186 "src/search.cc" 1
+# 185 "src/search.cc" 1
 	vpbroadcastd %ebx,%ymm0
 	vpmovmskb %ymm0,%eax
 # 0 "" 2
@@ -991,7 +928,7 @@ _Z7set_ymmv:
 .LFE7870:
 	.size	_Z7set_ymmv, .-_Z7set_ymmv
 	.section	.rodata.str1.1
-.LC2:
+.LC1:
 	.string	"data1:%x\n"
 	.text
 	.p2align 4
@@ -1006,9 +943,9 @@ _Z7clr_ymmv:
 	.cfi_offset 3, -16
 	xorl	%eax, %eax
 	movl	%eax, %ebx
-	leaq	.LC2(%rip), %rsi
+	leaq	.LC1(%rip), %rsi
 #APP
-# 197 "src/search.cc" 1
+# 196 "src/search.cc" 1
 	vpbroadcastd %ebx,%ymm0
 	vpmovmskb %ymm0,%eax
 # 0 "" 2
