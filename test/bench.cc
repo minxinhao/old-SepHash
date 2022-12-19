@@ -2,6 +2,7 @@
 #include "common.h"
 #include "nanobench.h"
 #include "search.h"
+#include "split_hash.h"
 #include <algorithm>
 #include <random>
 #include <stdio.h>
@@ -452,20 +453,20 @@ int main()
     // }
 
     // test rdma iops
-    for (uint64_t size = 64; size <= (1 << 10) * 64; size *= 2)
-    {
-        for (uint64_t batch = 1; batch <= 16; batch *= 2)
-        {
-            printf("size:%lu with batch:%lu\n", size, batch);
-            for (uint64_t i = 1; i <= 16; i *= 2)
-            {
-                for (uint64_t j = 1; j <= 4; j++)
-                {
-                    test_rdma_iops(i, j, 1, size, batch);
-                    fflush(stdout);
-                }
-            }
-        }
-    }
+    // for (uint64_t size = 64; size <= (1 << 10) * 64; size *= 2)
+    // {
+    //     for (uint64_t batch = 1; batch <= 16; batch *= 2)
+    //     {
+    //         printf("size:%lu with batch:%lu\n", size, batch);
+    //         for (uint64_t i = 1; i <= 16; i *= 2)
+    //         {
+    //             for (uint64_t j = 1; j <= 4; j++)
+    //             {
+    //                 test_rdma_iops(i, j, 1, size, batch);
+    //                 fflush(stdout);
+    //             }
+    //         }
+    //     }
+    // }
     // test_pure_write();
 }

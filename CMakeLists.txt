@@ -27,5 +27,8 @@ set(libs "-lmkl_intel_ilp64 -lmkl_sequential -lmkl_core -lpthread -lm -ldl -libv
 add_executable(bench test/bench.cc ${src} lib/search.o)
 target_link_libraries(bench PRIVATE ${libs})
 
+add_executable(sort test/sort.cc ${src} lib/search.o)
+target_link_libraries(sort PRIVATE ${libs})
+
 add_executable(ser_cli test/ser_cli.cc ${src} lib/search.o)
 target_link_libraries(ser_cli PRIVATE ${libs})
