@@ -5,10 +5,10 @@
 #include <map>
 #include <numeric>
 #include <stdint.h>
+#include <string.h>
 #include <string>
 #include <tuple>
 #include <vector>
-#include <string.h>
 namespace sort
 {
 
@@ -40,6 +40,10 @@ struct Slot
     operator uint64_t()
     {
         return *(uint64_t *)this;
+    }
+    Slot()
+    {
+        *this = (Slot)0;
     }
     Slot(uint64_t u)
     {
@@ -213,10 +217,16 @@ __uint128_t hash(const void *key, const int len, const uint32_t seed) noexcept
     return (__uint128_t)h1 << 64 | h2;
 }
 
+void ShowSlots(Slot *arr,uint64_t len){
+    for(uint64_t i = 0 ; i < len ; i++){
+        arr[i].print();
+    }
+}
+
 uint64_t find_free_slot(uint64_t pos, Slot *new_seg, uint64_t new_len)
 {
     // printf("pos:%lu\n",pos);
-    uint64_t bucket_size = 256;
+    uint64_t bucket_size = 64;
     for (uint64_t tmp = pos; tmp < pos + 2 * bucket_size && tmp < new_len; tmp++)
     {
         // printf("pos:%lu new_seg[%lu]:%lu\n",tmp,tmp,(uint64_t)new_seg[tmp]);
@@ -230,7 +240,7 @@ uint64_t find_free_slot(uint64_t pos, Slot *new_seg, uint64_t new_len)
             return tmp;
     }
     // return -1;
-    printf("err\n");
+    // printf("err\n");
     return 0;
 };
 
@@ -253,12 +263,41 @@ void insert_sort(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_seg_len, 
     }
 }
 
+void merge_insert(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_seg_len, Slot *new_seg)
+{
+    std::sort(data, data + len);
+    int off_1 = 0, off_2 = 0;
+    for (uint64_t i = 0; i < len + old_seg_len; i++)
+    {
+        if (data[off_1].fp <= old_seg[off_2].fp)
+        {
+            new_seg[i] = data[off_1];
+            off_1++;
+        }
+        else
+        {
+            new_seg[i] = old_seg[off_2];
+            off_2++;
+        }
+        if (off_1 == len || off_2 == old_seg_len)
+            break;
+    }
+    if (off_1 != len)
+    {
+        memcpy(new_seg + old_seg_len + off_1, data + off_1, len - off_1);
+    }
+    else
+    {
+        memcpy(new_seg + len + off_2, old_seg + off_2, old_seg_len - off_2);
+    }
+}
+
 void test_insert_sort()
 {
     for (uint64_t sort_size = 128; sort_size <= 128; sort_size *= 2)
     {
         Slot *data = (Slot *)malloc(sizeof(Slot) * sort_size);
-        for (uint64_t old_seg_size = 4; old_seg_size <= 128; old_seg_size++)
+        for (uint64_t old_seg_size = 1; old_seg_size <= 128; old_seg_size++)
         {
             std::map<int, int> cnt;
             for (uint64_t i = 0; i < sort_size; i++)
@@ -276,13 +315,16 @@ void test_insert_sort()
                 old_seg[i - sort_size].fp = fp(pattern);
                 cnt[old_seg[i - sort_size].fp] = 1;
             }
+            std::sort(old_seg, old_seg + sort_size * (old_seg_size));
             printf("sort_size:%lu old_seg_size:%lu - Avg Occur:%lf\n", sort_size, old_seg_size,
                    (1.0 * sort_size * (old_seg_size + 1)) / cnt.size());
             Slot *new_seg = (Slot *)malloc(sort_size * (old_seg_size + 1) * sizeof(Slot));
-            memset(new_seg,0,sort_size * (old_seg_size + 1) * sizeof(Slot));
+            memset(new_seg, 0, sort_size * (old_seg_size + 1) * sizeof(Slot));
             auto start = std::chrono::steady_clock::now();
-            insert_sort(data, sort_size, old_seg, sort_size * old_seg_size, new_seg);
+            // insert_sort(data, sort_size, old_seg, sort_size * old_seg_size, new_seg);
+            merge_insert(data, sort_size, old_seg, sort_size * old_seg_size, new_seg);
             auto end = std::chrono::steady_clock::now();
+            // ShowSlots(new_seg,sort_size * (old_seg_size + 1));
             double duration = std::chrono::duration<double, std::micro>(end - start).count();
             printf("Load duration:%.2lfus\n", duration);
             free(new_seg);
@@ -318,6 +360,7 @@ void test_stdsort()
         auto end = std::chrono::steady_clock::now();
         double duration = std::chrono::duration<double, std::micro>(end - start).count();
         printf("Load duration:%.2lfus\n", duration);
+        // ShowSlots(data,sort_size);
     }
     free(data);
 }
