@@ -8,7 +8,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
-
+#include <string.h>
 namespace sort
 {
 
@@ -213,28 +213,43 @@ __uint128_t hash(const void *key, const int len, const uint32_t seed) noexcept
     return (__uint128_t)h1 << 64 | h2;
 }
 
+uint64_t find_free_slot(uint64_t pos, Slot *new_seg, uint64_t new_len)
+{
+    // printf("pos:%lu\n",pos);
+    uint64_t bucket_size = 256;
+    for (uint64_t tmp = pos; tmp < pos + 2 * bucket_size && tmp < new_len; tmp++)
+    {
+        // printf("pos:%lu new_seg[%lu]:%lu\n",tmp,tmp,(uint64_t)new_seg[tmp]);
+        if (new_seg[tmp] == 0)
+            return tmp;
+    }
+    for (uint64_t tmp = 0; tmp < bucket_size; tmp++)
+    {
+        // printf("pos:%lu new_seg[%lu]:%lu\n",pos - tmp,pos - tmp,(uint64_t)new_seg[pos - tmp]);
+        if (pos >= tmp && new_seg[pos - tmp] == 0)
+            return tmp;
+    }
+    // return -1;
+    printf("err\n");
+    return 0;
+};
+
 void insert_sort(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_seg_len, Slot *new_seg)
 {
-    uint64_t bucket_size = 64;
-    auto find_free_slot = [=](uint64_t pos) -> uint64_t {
-        for (uint64_t tmp = pos; tmp < pos + 2 * bucket_size && tmp < (len + old_seg_len); tmp++)
-        {
-            if (new_seg[pos] == 0)
-                return tmp;
-        }
-        for (uint64_t tmp = 0; tmp < bucket_size; tmp++)
-        {
-            if (pos >= tmp && new_seg[pos - tmp] == 0)
-                return tmp;
-        }
-        return -1; 
-    };
-
     for (uint64_t i = 0; i < len; i++)
     {
+        // printf("data-%lu\n",i);
         uint64_t pos = (data[i].fp * (len + old_seg_len)) / UINT8_MAX;
-        pos = find_free_slot(pos);
+        pos = find_free_slot(pos, new_seg, len + old_seg_len);
         new_seg[pos] = data[i];
+    }
+
+    for (uint64_t i = 0; i < old_seg_len; i++)
+    {
+        // printf("old_seg-%lu\n",i);
+        uint64_t pos = (old_seg[i].fp * (len + old_seg_len)) / UINT8_MAX;
+        pos = find_free_slot(pos, new_seg, len + old_seg_len);
+        new_seg[pos] = old_seg[i];
     }
 }
 
@@ -243,7 +258,7 @@ void test_insert_sort()
     for (uint64_t sort_size = 128; sort_size <= 128; sort_size *= 2)
     {
         Slot *data = (Slot *)malloc(sizeof(Slot) * sort_size);
-        for (uint64_t old_seg_size = 1; old_seg_size < 128; old_seg_size++)
+        for (uint64_t old_seg_size = 4; old_seg_size <= 128; old_seg_size++)
         {
             std::map<int, int> cnt;
             for (uint64_t i = 0; i < sort_size; i++)
@@ -263,7 +278,8 @@ void test_insert_sort()
             }
             printf("sort_size:%lu old_seg_size:%lu - Avg Occur:%lf\n", sort_size, old_seg_size,
                    (1.0 * sort_size * (old_seg_size + 1)) / cnt.size());
-            Slot *new_seg = (Slot *)calloc(sort_size * (old_seg_size + 1), sizeof(Slot));
+            Slot *new_seg = (Slot *)malloc(sort_size * (old_seg_size + 1) * sizeof(Slot));
+            memset(new_seg,0,sort_size * (old_seg_size + 1) * sizeof(Slot));
             auto start = std::chrono::steady_clock::now();
             insert_sort(data, sort_size, old_seg, sort_size * old_seg_size, new_seg);
             auto end = std::chrono::steady_clock::now();
@@ -305,12 +321,27 @@ void test_stdsort()
     }
     free(data);
 }
-} // namespace sort
 
+void warm_up()
+{
+    int cnt = 0;
+    int data[1024];
+    while (cnt++ < 100)
+    {
+        for (int i = 0; i < 1024; i++)
+        {
+            data[i] = rand();
+        }
+        std::sort(data, data + 1024);
+    }
+}
+
+} // namespace sort
 int main()
 {
     using namespace sort;
-    test_stdsort();
+    warm_up();
+    // test_stdsort();
     test_insert_sort();
     return 0;
 }
