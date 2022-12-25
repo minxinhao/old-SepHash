@@ -19,10 +19,11 @@
 namespace SPLIT_HASH
 {
 constexpr uint64_t SEGMENT_SIZE = 1024;
-constexpr uint64_t SLOT_PER_SEG = ((SEGMENT_SIZE - 2*sizeof(uint64_t)) / 8);
-constexpr uint64_t INIT_LEVEL = 4;
-constexpr uint64_t MAX_LEVEL = 22;
-constexpr uint64_t DIR_SIZE = (1 << MAX_LEVEL);
+constexpr uint64_t SLOT_PER_SEG = ((SEGMENT_SIZE - 4 * sizeof(uint64_t)) / 8);
+constexpr uint64_t MAX_MAIN_SIZE = 64 * SLOT_PER_SEG;
+constexpr uint64_t INIT_DEPTH = 4;
+constexpr uint64_t MAX_DEPTH = 22;
+constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
 constexpr uint64_t ALIGNED_SIZE = 64;             // aligned size of len bitfield in DepSlot
 constexpr uint64_t dev_mem_size = (1 << 10) * 64; // 64KB的dev mem，用作lock
 constexpr uint64_t num_lock =
@@ -32,7 +33,7 @@ struct Slot
 {
     uint8_t fp : 8;
     uint8_t len : 3;
-    uint8_t sign : 1; //用来表示split delete信息
+    uint8_t sign : 1; // 用来表示split delete信息
     uint8_t dep : 4;
     uint64_t offset : 48;
     operator uint64_t()
@@ -42,6 +43,19 @@ struct Slot
     Slot(uint64_t u)
     {
         *this = *(Slot *)(&u);
+    }
+    bool operator<(const Slot &a) const
+    {
+        return fp < a.fp;
+    }
+    void print()
+    {
+        printf("fp:%d\t", fp);
+        printf("len:%d\t", len);
+        printf("sign:%d\t", sign);
+        printf("dep:%d\t", dep);
+        printf("offset:%lu\t", offset);
+        printf("size:%ld\n", sizeof(Slot));
     }
 } __attribute__((aligned(8)));
 
@@ -71,39 +85,46 @@ KVBlock *InitKVBlock(Slice *key, Slice *value, Alloc *alloc)
     return kv_block;
 }
 
-struct CurSeg{
+struct CurSeg
+{
     uint64_t split_lock;
-    uint8_t sign : 1;  // 实际中的split_lock可以和sign、level合并，这里为了不降rdma驱动版本就没有合并。
-    uint64_t level : 63; 
+    uint8_t sign : 1; // 实际中的split_lock可以和sign、depth合并，这里为了不降rdma驱动版本就没有合并。
+    uint64_t local_depth : 63;
+    uintptr_t main_seg_ptr;
+    uintptr_t main_seg_len;
     Slot slots[SLOT_PER_SEG];
 };
 
 struct MainSeg
 {
-    uint64_t level; // number of Segment in MainSeg ; 32和64好像都行，这里只是考虑了对齐; 
     Slot slots[0];
 } __attribute__((aligned(8)));
 
 struct DirEntry
 {
-    uintptr_t seg_ptr;
-    uint64_t local_level;
+    uint64_t local_depth;
+    uintptr_t cur_seg_ptr;
+    uintptr_t main_seg_ptr;
+    uint64_t main_seg_len;
+    bool operator==(const DirEntry &other) const
+    {
+        return cur_seg_ptr == other.cur_seg_ptr && main_seg_ptr == other.main_seg_ptr &&
+               main_seg_len == other.main_seg_len;
+    }
 } __attribute__((aligned(8)));
 
 struct Directory
 {
-    uint64_t global_level ; //number of segment
-    uintptr_t cur_table; // point to current table
+    uint64_t global_depth;   // number of segment
     DirEntry segs[DIR_SIZE]; // Directory use MSB and is allocated enough space in advance.
-    uint64_t start_cnt;             // 为多客户端同步保留的字段，不影响原有空间布局
+    uint64_t start_cnt;      // 为多客户端同步保留的字段，不影响原有空间布局
 } __attribute__((aligned(8)));
-
 
 class Client : public BasicDB
 {
   public:
     Client(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, rdma_conn *_wowait_conn,
-               uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id);
+           uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id);
 
     Client(const Client &) = delete;
 
@@ -115,7 +136,7 @@ class Client : public BasicDB
     task<> reset_remote();
 
     task<> insert(Slice *key, Slice *value);
-    task<> search(Slice *key, Slice *value); 
+    task<> search(Slice *key, Slice *value);
     task<> update(Slice *key, Slice *value);
     task<> remove(Slice *key);
 
