@@ -20,7 +20,7 @@ else
             --roce \
             --max_coro 256 --cq_size 64 \
             --machine_id $1  \
-            --num_op 1 \
+            --num_op 200000 \
             --pattern_type 0 \
             --insert_frac 0.0 \
             --read_frac   1.0 \

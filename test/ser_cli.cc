@@ -9,7 +9,7 @@
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
-uint64_t load_num = 10000000;
+uint64_t load_num = 200000;
 using ClientType = SPLIT_HASH::Client;
 using ServerType = SPLIT_HASH::Server;
 using Slice = SPLIT_HASH::Slice;

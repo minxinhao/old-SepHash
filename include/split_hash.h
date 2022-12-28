@@ -50,7 +50,7 @@ struct Slot
     }
     void print()
     {
-        printf("fp:%d\t", fp);
+        printf("fp:%x\t", fp);
         printf("len:%d\t", len);
         printf("sign:%d\t", sign);
         printf("dep:%d\t", dep);
@@ -136,7 +136,7 @@ class Client : public BasicDB
     task<> reset_remote();
 
     task<> insert(Slice *key, Slice *value);
-    task<> search(Slice *key, Slice *value);
+    task<bool> search(Slice *key, Slice *value);
     task<> update(Slice *key, Slice *value);
     task<> remove(Slice *key);
 
