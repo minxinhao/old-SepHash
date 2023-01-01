@@ -90,6 +90,7 @@ Client::Client(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn
     dir = (Directory *)alloc.alloc(sizeof(Directory));
     memset(dir, 0, sizeof(Directory));
     cli->run(sync_dir());
+    // dir->print();
 }
 
 Client::~Client()
@@ -124,12 +125,13 @@ task<> Client::reset_remote()
     }
 
     // 重置远端 Directory
-    co_await conn->write(seg_rmr.raddr, seg_rmr.rkey, dir, size_t(sizeof(Directory)), lmr->lkey);
+    // dir->print();
+    co_await conn->write(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
 }
 
 task<> Client::start(uint64_t total)
 {
-    // co_await sync_dir();
+    co_await sync_dir();
     uint64_t *start_cnt = (uint64_t *)alloc.alloc(sizeof(uint64_t), true);
     *start_cnt = 0;
     co_await conn->fetch_add(seg_rmr.raddr + sizeof(Directory) - sizeof(uint64_t), seg_rmr.rkey, *start_cnt, 1);
@@ -179,7 +181,7 @@ Retry:
     uintptr_t version_ptr = lock_rmr.raddr + sizeof(uint64_t) + (sizeof(uint64_t)) * (segloc % num_lock);
 
     // faa version for seg
-    // TODO: 改成no_wait
+    // TODO: 改成 no_wait
     perf.StartPerf();
     uint64_t *version = (uint64_t *)alloc.alloc(sizeof(uint64_t));
     co_await conn->fetch_add(version_ptr, lock_rmr.rkey, *version, 1);
@@ -192,14 +194,14 @@ Retry:
     co_await conn->read(segptr, seg_rmr.rkey, cur_seg, sizeof(CurSeg), lmr->lkey);
     perf.AddPerf("ReadSeg");
 
-
-    if(retry_cnt>10000){
-        log_err(
-        "[%lu:%lu]insert key:%lu(hash:%lx fp:%lx) with remote local_depth:%lu local_depth:%lu global_depth:%lu at "
-        "segloc:%lx with seg_ptr:%lx and main_seg_ptr:%lx",
-        cli_id, coro_id, *(uint64_t *)key->data, pattern_1, fp(pattern_1), cur_seg->local_depth,
-        dir->segs[segloc].local_depth, dir->global_depth, segloc, segptr, cur_seg->main_seg_ptr);
-    }
+    // if(retry_cnt>10000){
+    //     log_err(
+    //     "[%lu:%lu]insert key:%lu(hash:%lx fp:%lx) with remote local_depth:%lu local_depth:%lu global_depth:%lu at "
+    //     "segloc:%lx with seg_ptr:%lx and main_seg_ptr:%lx",
+    //     cli_id, coro_id, *(uint64_t *)key->data, pattern_1, fp(pattern_1), cur_seg->local_depth,
+    //     dir->segs[segloc].local_depth, dir->global_depth, segloc, segptr, cur_seg->main_seg_ptr);
+    //     // exit(-1);
+    // }
 
     // Check whether split happened on cur_table
     if (cur_seg->local_depth != dir->segs[segloc].local_depth)
@@ -218,7 +220,7 @@ Retry:
     // if(retry_cnt>10000){
     //     log_err("[%lu:%lu]insert key:%lu at segloc:%lx at slot:%lx for sign:%lx and cur_seg-sign:%d", cli_id, coro_id,
     //              *(uint64_t *)key->data, segloc, slot_id, sign, cur_seg->sign);
-    //     exit(-1);
+    //     // exit(-1);
     // }
 
     // ((Slot)(bitmask)).print();
@@ -383,13 +385,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
         new_cur_seg->main_seg_len = off2;
         co_await conn->write(new_cur_ptr, seg_rmr.rkey, new_cur_seg, sizeof(CurSeg), lmr->lkey);
         co_await conn->write(new_cur_seg->main_seg_ptr, seg_rmr.rkey, new_seg_2, sizeof(Slot) * off2, lmr->lkey);
-
-        old_seg->main_seg_ptr = ralloc.alloc(sizeof(Slot) * off1);
-        old_seg->main_seg_len = off1;
-        old_seg->local_depth = local_depth + 1;
-        old_seg->sign = !old_seg->sign; // 对old cur_seg的清空放到最后?保证同步。
-        co_await conn->write(old_seg->main_seg_ptr, seg_rmr.rkey, new_seg_1, sizeof(Slot) * off1, lmr->lkey);
-
+        
         // Edit Dir
         while (co_await LockDir())
             ;
@@ -400,6 +396,15 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
             co_await conn->cas_n(seg_ptr, seg_rmr.rkey, 1, 0);
             co_return;
         }
+
+        // 将Old_Seg放置到Lock之后，避免重复修改？ 
+        old_seg->main_seg_ptr = ralloc.alloc(sizeof(Slot) * off1);
+        old_seg->main_seg_len = off1;
+        old_seg->local_depth = local_depth + 1;
+        old_seg->sign = !old_seg->sign; // 对old cur_seg的清空放到最后?保证同步。
+        co_await conn->write(old_seg->main_seg_ptr, seg_rmr.rkey, new_seg_1, sizeof(Slot) * off1, lmr->lkey);
+        
+
         uint64_t first_seg_loc = seg_loc & ((1ull << local_depth) - 1);
         uint64_t new_seg_loc = (1ull << local_depth) | first_seg_loc;
         if (local_depth == dir->global_depth)
@@ -459,7 +464,8 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
         }
         co_await UnlockDir();
         old_seg->split_lock = 0;
-        co_await conn->write(seg_ptr, seg_rmr.rkey, old_seg, 4 * sizeof(uint64_t), lmr->lkey);
+        co_await conn->write(seg_ptr+sizeof(uint64_t), seg_rmr.rkey, ((char*)old_seg)+sizeof(uint64_t), 3 * sizeof(uint64_t), lmr->lkey);
+        co_await conn->write(seg_ptr, seg_rmr.rkey, &old_seg->split_lock,sizeof(uint64_t), lmr->lkey);
     }
     else
     {
@@ -481,7 +487,9 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
         // 1.4 FreeLock && Change Sign
         old_seg->split_lock = 0;
         old_seg->sign = !old_seg->sign;
-        co_await conn->write(seg_ptr, seg_rmr.rkey, old_seg, 4 * sizeof(uint64_t), lmr->lkey);
+        // co_await conn->write(seg_ptr, seg_rmr.rkey, old_seg, 4 * sizeof(uint64_t), lmr->lkey);
+        co_await conn->write(seg_ptr+sizeof(uint64_t), seg_rmr.rkey, ((char*)old_seg)+sizeof(uint64_t), 3 * sizeof(uint64_t), lmr->lkey);
+        co_await conn->write(seg_ptr, seg_rmr.rkey, &old_seg->split_lock,sizeof(uint64_t), lmr->lkey);
     }
 
     perf.StartPerf();
@@ -524,7 +532,7 @@ Retry:
     end_pos = (end_pos >= main_seg_len) ? main_seg_len : end_pos;
     // log_err("start_pos:%lu end_pos:%lu",start_pos,end_pos);
     start_pos = 0;
-    end_pos = 64;
+    end_pos = main_seg_len;
     uint64_t main_size = (end_pos - start_pos) * sizeof(Slot);
     Slot *main_seg = (Slot *)alloc.alloc(main_size);
     auto read_main_seg =
@@ -591,20 +599,21 @@ Retry:
             }
         }
     }
-    std::string tmp_value = std::string(32, '1');
-    value->len = tmp_value.length();
-    memcpy(value->data,tmp_value.data(),tmp_value.length());
-    co_return true;
-    // if (res != nullptr && res->v_len != 0)
-    // {
-    //     value->len = res->v_len;
-    //     memcpy(value->data, res->data + res->k_len, value->len);
-    //     co_return true;
-    // }
+    // std::string tmp_value = std::string(32, '1');
+    // value->len = tmp_value.length();
+    // memcpy(value->data,tmp_value.data(),tmp_value.length());
+    // co_return true;
 
-    // log_err("[%lu:%lu]No match key for %lu", cli_id, coro_id, *(uint64_t *)key->data);
-    // if(*(uint64_t*)key->data == 2)exit(-1);
-    // co_return false;
+    if (res != nullptr && res->v_len != 0)
+    {
+        value->len = res->v_len;
+        memcpy(value->data, res->data + res->k_len, value->len);
+        co_return true;
+    }
+
+    log_err("[%lu:%lu]No match key for %lu", cli_id, coro_id, *(uint64_t *)key->data);
+    exit(-1);
+    co_return false;
 }
 task<> Client::update(Slice *key, Slice *value)
 {

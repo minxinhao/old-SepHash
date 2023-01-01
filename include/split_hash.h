@@ -20,7 +20,7 @@ namespace SPLIT_HASH
 {
 constexpr uint64_t SEGMENT_SIZE = 1024;
 constexpr uint64_t SLOT_PER_SEG = ((SEGMENT_SIZE - 4 * sizeof(uint64_t)) / 8);
-constexpr uint64_t MAX_MAIN_SIZE = 16 * SLOT_PER_SEG;
+constexpr uint64_t MAX_MAIN_SIZE = 8 * SLOT_PER_SEG;
 constexpr uint64_t INIT_DEPTH = 16;
 constexpr uint64_t MAX_DEPTH = 22;
 constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
@@ -118,6 +118,13 @@ struct Directory
     uint64_t global_depth;   // number of segment
     DirEntry segs[DIR_SIZE]; // Directory use MSB and is allocated enough space in advance.
     uint64_t start_cnt;      // 为多客户端同步保留的字段，不影响原有空间布局
+
+    void print(){
+        log_err("Global_Depth:%lu",global_depth);
+        for(uint64_t i = 0 ; i < (1<<global_depth) ; i++){
+            log_err("Entry %lu : local_depth:%lu cur_seg_ptr:%lx main_seg_ptr:%lx main_seg_lne:%lx",i,segs[i].local_depth,segs[i].cur_seg_ptr,segs[i].main_seg_ptr,segs[i].main_seg_len);
+        }
+    }
 } __attribute__((aligned(8)));
 
 class Client : public BasicDB
