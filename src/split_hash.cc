@@ -171,6 +171,7 @@ task<> Client::insert(Slice *key, Slice *value)
     uint64_t retry_cnt = 0;
     perf.AddPerf("InitKv");
 Retry:
+    retry_cnt++;
     alloc.ReSet(sizeof(Directory) + kvblock_len);
     Slot *tmp = (Slot *)alloc.alloc(sizeof(Slot));
     uint64_t segloc = get_seg_loc(pattern_1, dir->global_depth);
@@ -192,11 +193,13 @@ Retry:
     perf.AddPerf("ReadSeg");
 
 
-    // log_err(
-    //     "[%lu:%lu]insert key:%lu(hash:%lx fp:%lx) with remote local_depth:%lu local_depth:%lu global_depth:%lu at "
-    //     "segloc:%lx with seg_ptr:%lx and main_seg_ptr:%lx",
-    //     cli_id, coro_id, *(uint64_t *)key->data, pattern_1, fp(pattern_1), cur_seg->local_depth,
-    //     dir->segs[segloc].local_depth, dir->global_depth, segloc, segptr, cur_seg->main_seg_ptr);
+    if(retry_cnt>10000){
+        log_err(
+        "[%lu:%lu]insert key:%lu(hash:%lx fp:%lx) with remote local_depth:%lu local_depth:%lu global_depth:%lu at "
+        "segloc:%lx with seg_ptr:%lx and main_seg_ptr:%lx",
+        cli_id, coro_id, *(uint64_t *)key->data, pattern_1, fp(pattern_1), cur_seg->local_depth,
+        dir->segs[segloc].local_depth, dir->global_depth, segloc, segptr, cur_seg->main_seg_ptr);
+    }
 
     // Check whether split happened on cur_table
     if (cur_seg->local_depth != dir->segs[segloc].local_depth)
@@ -212,8 +215,11 @@ Retry:
     sign = sign << 11;
     uint64_t slot_id = linear_search_bitmask((uint64_t *)cur_seg->slots, SLOT_PER_SEG, sign, bitmask);
     perf.AddPerf("FindSlot");
-    // log_err("[%lu:%lu]insert key:%lu at segloc:%lx at slot:%lx for sign:%lx and cur_seg-sign:%d", cli_id, coro_id,
+    // if(retry_cnt>10000){
+    //     log_err("[%lu:%lu]insert key:%lu at segloc:%lx at slot:%lx for sign:%lx and cur_seg-sign:%d", cli_id, coro_id,
     //              *(uint64_t *)key->data, segloc, slot_id, sign, cur_seg->sign);
+    //     exit(-1);
+    // }
 
     // ((Slot)(bitmask)).print();
     // cur_seg->slots[0].print();
