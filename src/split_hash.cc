@@ -232,9 +232,9 @@ Retry:
         // Split
         perf.AddCnt("SplitCnt");
         // log_err("[%lu:%lu]split key:%lu with remote local_depth:%lu local_depth:%lu global_depth:%lu at segloc:%lx "
-        //         "with seg_ptr:%lx and main_seg_ptr:%lx",
+        //         "with seg_ptr:%lx and main_seg_ptr:%lx main_seg_len:%lu",
         //         cli_id, coro_id, *(uint64_t *)key->data, cur_seg->local_depth, dir->segs[segloc].local_depth,
-        //         dir->global_depth, segloc, segptr, cur_seg->main_seg_ptr);
+        //         dir->global_depth, segloc, segptr, cur_seg->main_seg_ptr,cur_seg->main_seg_len);
 
         co_await Split(segloc, segptr, cur_seg);
         goto Retry;
@@ -298,6 +298,12 @@ void print_mainseg(Slot* main_seg,uint64_t main_seg_len){
     }
 }
 
+void print_fpinfo(FpInfo* fp_info){
+    for(uint64_t i = 0 ; i <= UINT8_MAX ; i++){
+        log_err("FP:%lu NUM:%d",i,fp_info[i].num);
+    }
+}
+
 void cal_fpinfo(Slot* main_seg,uint64_t main_seg_len,FpInfo* fp_info){
     double avg = (1.0 * main_seg_len) / UINT8_MAX;
     uint64_t base_off = 0;
@@ -308,29 +314,30 @@ void cal_fpinfo(Slot* main_seg,uint64_t main_seg_len,FpInfo* fp_info){
     uint64_t correct_cnt = 0;
     uint64_t err;
     for(uint64_t i = 0 ; i < main_seg_len; i++){
-        if(main_seg[i].fp != prev_fp){
-            prev_fp = main_seg[i].fp;
-            predict = (main_seg[i].fp - base_index) * avg + base_off;
-            err = (i >= predict) ? (i - predict):(predict - i);
-            // log_err("predict for fp:%x with offset:%lu which expects:%lu and error:%lu",main_seg[i].fp,predict,i,err);
-            if (err >= max_error)
-            {
-                log_err("Error Exceed At fp:%x and offset:%lu with atual offset:%lu",main_seg[i].fp,predict,i);
-                base_index = main_seg[i].fp;
-                base_off = i;
-                fp_info[correct_cnt].fp = main_seg[i].fp;
-                fp_info[correct_cnt].offset = i;
-                correct_cnt++;
-                if(correct_cnt>=MAX_FP_INFO){
-                    log_err("To Many FP Correct");
-                    print_mainseg(main_seg,main_seg_len);
-                    for(uint64_t i = 0 ; i < MAX_FP_INFO ; i++){
-                        log_err("FP_INFO:fp:%x offset:%lu",fp_info[i].fp,fp_info[i].offset);
-                    }
-                    exit(-1);
-                }
-            }
-        }
+        // if(main_seg[i].fp != prev_fp){
+            // prev_fp = main_seg[i].fp;
+            // predict = (main_seg[i].fp - base_index) * avg + base_off;
+            // err = (i >= predict) ? (i - predict):(predict - i);
+            // // log_err("predict for fp:%x with offset:%lu which expects:%lu and error:%lu",main_seg[i].fp,predict,i,err);
+            // if (err >= max_error)
+            // {
+            //     log_err("Error Exceed At fp:%x and offset:%lu with atual offset:%lu",main_seg[i].fp,predict,i);
+            //     base_index = main_seg[i].fp;
+            //     base_off = i;
+            //     // fp_info[correct_cnt].fp = main_seg[i].fp;
+            //     // fp_info[correct_cnt].offset = i;
+            //     correct_cnt++;
+            //     if(correct_cnt>=MAX_FP_INFO){
+            //         log_err("To Many FP Correct");
+            //         print_mainseg(main_seg,main_seg_len);
+            //         for(uint64_t i = 0 ; i < MAX_FP_INFO ; i++){
+            //             // log_err("FP_INFO:fp:%x offset:%lu",fp_info[i].fp,fp_info[i].offset);
+            //         }
+            //         exit(-1);
+            //     }
+            // }
+        // }
+        fp_info[main_seg[i].fp].num++;
     }
 }
 
@@ -383,7 +390,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
     // }
     merge_insert(old_seg->slots, SLOT_PER_SEG, main_seg->slots, dir->segs[seg_loc].main_seg_len, new_main_seg->slots);
     FpInfo fp_info[MAX_FP_INFO] = {};
-    // cal_fpinfo(new_main_seg->slots,SLOT_PER_SEG+dir->segs[seg_loc].main_seg_len,fp_info);
+    cal_fpinfo(new_main_seg->slots,SLOT_PER_SEG+dir->segs[seg_loc].main_seg_len,fp_info);
     // log_err("merge_insert");
     // for (uint64_t i = 0; i < SLOT_PER_SEG + dir->segs[seg_loc].main_seg_len; i++)
     // {
@@ -425,8 +432,8 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
         }
         FpInfo fp_info1[MAX_FP_INFO] = {};
         FpInfo fp_info2[MAX_FP_INFO] = {};
-        // cal_fpinfo(new_seg_1->slots,off1,fp_info1);
-        // cal_fpinfo(new_seg_2->slots,off2,fp_info2);
+        cal_fpinfo(new_seg_1->slots,off1,fp_info1);
+        cal_fpinfo(new_seg_2->slots,off2,fp_info2);     
 
         // Alloc new cur table
         uintptr_t new_cur_ptr = ralloc.alloc(sizeof(CurSeg), true);
@@ -459,7 +466,6 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
         old_seg->sign = !old_seg->sign; // 对old cur_seg的清空放到最后?保证同步。
         co_await conn->write(old_seg->main_seg_ptr, seg_rmr.rkey, new_seg_1, sizeof(Slot) * off1, lmr->lkey);
         
-
         uint64_t first_seg_loc = seg_loc & ((1ull << local_depth) - 1);
         uint64_t new_seg_loc = (1ull << local_depth) | first_seg_loc;
         if (local_depth == dir->global_depth)
@@ -474,7 +480,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
             dir->segs[seg_loc].main_seg_ptr = old_seg->main_seg_ptr;
             dir->segs[seg_loc].main_seg_len = old_seg->main_seg_len;
             dir->segs[seg_loc].local_depth = local_depth + 1;
-            // memcpy(dir->segs[seg_loc].fp,fp_info1,sizeof(FpInfo)*MAX_FP_INFO);
+            memcpy(dir->segs[seg_loc].fp,fp_info1,sizeof(FpInfo)*MAX_FP_INFO);
             co_await conn->write(seg_rmr.raddr + sizeof(uint64_t) + seg_loc * sizeof(DirEntry), seg_rmr.rkey,
                                  &dir->segs[seg_loc], sizeof(DirEntry), lmr->lkey);
             // Extend Dir
@@ -490,7 +496,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
             dir->segs[new_seg_loc].cur_seg_ptr = new_cur_ptr;
             dir->segs[new_seg_loc].main_seg_ptr = new_cur_seg->main_seg_ptr;
             dir->segs[new_seg_loc].main_seg_len = new_cur_seg->main_seg_len;
-            // memcpy(dir->segs[new_seg_loc].fp,fp_info2,sizeof(FpInfo)*MAX_FP_INFO);
+            memcpy(dir->segs[new_seg_loc].fp,fp_info2,sizeof(FpInfo)*MAX_FP_INFO);
             // log_err("new_seg_loc:%lx new_seg_ptr_1:%lx", new_seg_loc,new_seg_ptr_1);
             co_await conn->write(seg_rmr.raddr + sizeof(uint64_t) + dir_size * sizeof(DirEntry), seg_rmr.rkey,
                                  dir->segs + dir_size, dir_size * sizeof(DirEntry), lmr->lkey);
@@ -514,6 +520,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
                     dir->segs[cur_seg_loc].cur_seg_ptr = new_cur_ptr;
                     dir->segs[cur_seg_loc].main_seg_ptr = new_cur_seg->main_seg_ptr;
                     dir->segs[cur_seg_loc].main_seg_len = new_cur_seg->main_seg_len;
+                    memcpy(dir->segs[cur_seg_loc].fp,fp_info2,sizeof(FpInfo)*MAX_FP_INFO);
                 }
                 else
                 {
@@ -521,6 +528,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
                     dir->segs[cur_seg_loc].cur_seg_ptr = seg_ptr;
                     dir->segs[cur_seg_loc].main_seg_ptr = old_seg->main_seg_ptr;
                     dir->segs[cur_seg_loc].main_seg_len = old_seg->main_seg_len;
+                    memcpy(dir->segs[cur_seg_loc].fp,fp_info1,sizeof(FpInfo)*MAX_FP_INFO);
                 }
                 dir->segs[cur_seg_loc].local_depth = local_depth + 1;
                 co_await conn->write(seg_rmr.raddr + sizeof(uint64_t) + cur_seg_loc * sizeof(DirEntry), seg_rmr.rkey,
@@ -591,14 +599,14 @@ Retry:
     uint64_t main_seg_len = dir->segs[segloc].main_seg_len;
     uint64_t base_index = 0 ;
     uint64_t base_off = 0 ;
-    for(uint64_t i = 0 ; i < MAX_FP_INFO ; i++){
-        if((uint64_t)dir->segs[segloc].fp[i]==0)
-            break;
-        if(dir->segs[segloc].fp[i].fp <= tmp_fp ){
-            base_index = dir->segs[segloc].fp[i].fp;
-            base_off = dir->segs[segloc].fp[i].offset;
-        }
-    }
+    // for(uint64_t i = 0 ; i < MAX_FP_INFO ; i++){
+    //     if((uint64_t)dir->segs[segloc].fp[i]==0)
+    //         break;
+    //     if(dir->segs[segloc].fp[i].fp <= tmp_fp ){
+    //         base_index = dir->segs[segloc].fp[i].fp;
+    //         base_off = dir->segs[segloc].fp[i].offset;
+    //     }
+    // }
 
     // Read Segment
     CurSeg *cur_seg = (CurSeg *)alloc.alloc(sizeof(CurSeg));
@@ -607,14 +615,23 @@ Retry:
     double bucket_len = (1.0 * main_seg_len) / UINT8_MAX;
     uint64_t init_start_pos = (tmp_fp - base_index) * bucket_len + base_off;; // 为了避免算出来0
 
-    // log_err("bucket_len:%lf  init_start_pos:%lu",bucket_len,init_start_pos);
-    uint64_t correct_len = 32;                         
-    uint64_t start_pos = (init_start_pos > correct_len) ? (init_start_pos - correct_len) : 0;
-    uint64_t end_pos = init_start_pos + correct_len;
-    end_pos = (end_pos >= main_seg_len) ? main_seg_len : end_pos;
+    // // log_err("bucket_len:%lf  init_start_pos:%lu",bucket_len,init_start_pos);
+    // uint64_t correct_len = 32;                         
+    // uint64_t start_pos = (init_start_pos > correct_len) ? (init_start_pos - correct_len) : 0;
+    // uint64_t end_pos = init_start_pos + correct_len;
+    // end_pos = (end_pos >= main_seg_len) ? main_seg_len : end_pos;
     // log_err("start_pos:%lu end_pos:%lu",start_pos,end_pos);
-    start_pos = 0;
-    end_pos = main_seg_len;
+    uint64_t start_pos = 0;
+    uint64_t end_pos = 120;
+    for(uint64_t i = 0 ; i <= UINT8_MAX ; i++){
+        // log_err("FP:%lu NUM:%u",i,dir->segs[segloc].fp[i].num);
+        if(i==UINT8_MAX || i >= tmp_fp){
+            break;
+        }
+        start_pos += dir->segs[segloc].fp[i].num;
+    }
+    // start_pos = 0;
+    end_pos = start_pos + dir->segs[segloc].fp[tmp_fp].num;
     uint64_t main_size = (end_pos - start_pos) * sizeof(Slot);
     Slot *main_seg = (Slot *)alloc.alloc(main_size);
     auto read_main_seg =

@@ -82,6 +82,12 @@ struct Directory
     uint64_t global_depth;
     struct DirEntry segs[DIR_SIZE]; // Directory use MSB and is allocated enough space in advance.
     uint64_t start_cnt;             // 为多客户端同步保留的字段，不影响原有空间布局
+    void print(){
+        log_err("Global_Depth:%lu",global_depth);
+        for(uint64_t i = 0 ; i < (1<<global_depth) ; i++){
+            log_err("Entry %lu : local_depth:%lu seg_ptr:%lx ",i,segs[i].local_depth,segs[i].seg_ptr);
+        }
+    }
 } __attribute__((aligned(8)));
 
 class RACEClient : public BasicDB

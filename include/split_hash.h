@@ -21,7 +21,7 @@ namespace SPLIT_HASH
 constexpr uint64_t SEGMENT_SIZE = 1024;
 constexpr uint64_t SLOT_PER_SEG = ((SEGMENT_SIZE - 4 * sizeof(uint64_t)) / 8);
 constexpr uint64_t MAX_MAIN_SIZE = 16 * SLOT_PER_SEG;
-constexpr uint64_t MAX_FP_INFO = 4;
+constexpr uint64_t MAX_FP_INFO = 256;
 constexpr uint64_t INIT_DEPTH = 4;
 constexpr uint64_t MAX_DEPTH = 13;
 constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
@@ -103,13 +103,12 @@ struct MainSeg
 
 /// @brief 记录MainSeg中，偏差超过32处的fp和offset
 struct FpInfo{ 
-    uint8_t fp : 8;
-    uint64_t offset: 58; //与实际位置的误差
+    uint8_t num; // 数量 
     operator uint64_t()
     {
         return *(uint64_t *)this;
     }
-}__attribute__((aligned(2)));
+}__attribute__((aligned(1)));
 
 struct DirEntry
 {

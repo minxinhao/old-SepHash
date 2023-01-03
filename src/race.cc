@@ -128,6 +128,7 @@ RACEClient::~RACEClient()
 
 task<> RACEClient::reset_remote()
 {
+    dir->print();
     //模拟远端分配器信息
     Alloc server_alloc;
     server_alloc.Set((char *)rmr.raddr, rmr.rlen);
