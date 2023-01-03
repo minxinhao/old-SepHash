@@ -20,9 +20,10 @@ namespace SPLIT_HASH
 {
 constexpr uint64_t SEGMENT_SIZE = 1024;
 constexpr uint64_t SLOT_PER_SEG = ((SEGMENT_SIZE - 4 * sizeof(uint64_t)) / 8);
-constexpr uint64_t MAX_MAIN_SIZE = 8 * SLOT_PER_SEG;
-constexpr uint64_t INIT_DEPTH = 16;
-constexpr uint64_t MAX_DEPTH = 22;
+constexpr uint64_t MAX_MAIN_SIZE = 16 * SLOT_PER_SEG;
+constexpr uint64_t MAX_FP_INFO = 4;
+constexpr uint64_t INIT_DEPTH = 4;
+constexpr uint64_t MAX_DEPTH = 13;
 constexpr uint64_t DIR_SIZE = (1 << MAX_DEPTH);
 constexpr uint64_t ALIGNED_SIZE = 64;             // aligned size of len bitfield in DepSlot
 constexpr uint64_t dev_mem_size = (1 << 10) * 64; // 64KB的dev mem，用作lock
@@ -100,12 +101,24 @@ struct MainSeg
     Slot slots[0];
 } __attribute__((aligned(8)));
 
+/// @brief 记录MainSeg中，偏差超过32处的fp和offset
+struct FpInfo{ 
+    uint8_t fp : 8;
+    uint64_t offset: 58; //与实际位置的误差
+    operator uint64_t()
+    {
+        return *(uint64_t *)this;
+    }
+}__attribute__((aligned(2)));
+
 struct DirEntry
 {
-    uint64_t local_depth;
-    uintptr_t cur_seg_ptr;
-    uintptr_t main_seg_ptr;
-    uint64_t main_seg_len;
+    // TODO : 实际上只需要用5 bits，为了方便ptr统一48，所以这里仍保留16bits
+    uint64_t local_depth ; 
+    uintptr_t cur_seg_ptr ;
+    uintptr_t main_seg_ptr ;
+    uint64_t main_seg_len ;
+    FpInfo fp[MAX_FP_INFO];
     bool operator==(const DirEntry &other) const
     {
         return cur_seg_ptr == other.cur_seg_ptr && main_seg_ptr == other.main_seg_ptr &&
