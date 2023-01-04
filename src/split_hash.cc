@@ -622,7 +622,7 @@ Retry:
     // end_pos = (end_pos >= main_seg_len) ? main_seg_len : end_pos;
     // log_err("start_pos:%lu end_pos:%lu",start_pos,end_pos);
     uint64_t start_pos = 0;
-    uint64_t end_pos = 120;
+    uint64_t end_pos = main_seg_len;
     for(uint64_t i = 0 ; i <= UINT8_MAX ; i++){
         // log_err("FP:%lu NUM:%u",i,dir->segs[segloc].fp[i].num);
         if(i==UINT8_MAX || i >= tmp_fp){
@@ -647,6 +647,7 @@ Retry:
     //         cur_seg->local_depth, dir->global_depth, start_pos, end_pos, main_seg_ptr, main_seg_len);
     if (dir->segs[segloc].local_depth != cur_seg->local_depth || cur_seg->main_seg_ptr != main_seg_ptr)
     {
+        log_err("Inconsistent");
         co_await sync_dir();
         goto Retry;
     }
@@ -656,11 +657,13 @@ Retry:
     uint64_t res_slot = UINT64_MAX;
     KVBlock *res = nullptr;
     KVBlock *kv_block = (KVBlock *)alloc.alloc(7 * ALIGNED_SIZE);
+    uint64_t dep = cur_seg->local_depth - (cur_seg->local_depth % 4); // 按4对齐
+    uint8_t dep_info = (pattern_1 >> dep) & 0xf;
     // log_err("CurSeg");
     for (uint64_t i = 0; i < SLOT_PER_SEG; i++)
     {
         // cur_seg->slots[i].print();
-        if (cur_seg->slots[i] != 0 && cur_seg->slots[i].fp == tmp_fp)
+        if (cur_seg->slots[i] != 0 && cur_seg->slots[i].fp == tmp_fp && cur_seg->slots[i].dep == dep_info)
         {
             co_await conn->read(ralloc.ptr(cur_seg->slots[i].offset), seg_rmr.rkey, kv_block,
                                 (cur_seg->slots[i].len) * ALIGNED_SIZE, lmr->lkey);
@@ -681,12 +684,12 @@ Retry:
     for (uint64_t i = 0; i < end_pos - start_pos; i++)
     {
         // main_seg[i].print();
-        if (main_seg[i] != 0 && main_seg[i].fp == tmp_fp)
+        if (main_seg[i] != 0 && main_seg[i].fp == tmp_fp && main_seg[i].dep == dep_info) 
         {
             co_await conn->read(ralloc.ptr(main_seg[i].offset), seg_rmr.rkey, kv_block,
                                 (main_seg[i].len) * ALIGNED_SIZE, lmr->lkey);
-            // log_err("read key:%lu key-len:%lu version:%lu value-len:%lu value:%s", *(uint64_t *)kv_block->data,
-            //         kv_block->k_len, kv_block->version, kv_block->v_len, kv_block->data + kv_block->k_len);
+            // log_err("[%lu:%lu]For key:%lu read %lu key-len:%lu version:%lu value-len:%lu value:%s with tmp_fp:%x dep_info:%x", cli_id,coro_id,*(uint64_t *)key->data, *(uint64_t *)kv_block->data,
+            //         kv_block->k_len, kv_block->version, kv_block->v_len, kv_block->data + kv_block->k_len,main_seg[i].dep,dep_info);
             if (memcmp(key->data, kv_block->data, key->len) == 0)
             {
                 if (kv_block->version > version || version == UINT64_MAX)
@@ -698,10 +701,10 @@ Retry:
             }
         }
     }
-    // std::string tmp_value = std::string(32, '1');
-    // value->len = tmp_value.length();
-    // memcpy(value->data,tmp_value.data(),tmp_value.length());
-    // co_return true;
+    std::string tmp_value = std::string(32, '1');
+    value->len = tmp_value.length();
+    memcpy(value->data,tmp_value.data(),tmp_value.length());
+    co_return true;
 
     if (res != nullptr && res->v_len != 0)
     {
