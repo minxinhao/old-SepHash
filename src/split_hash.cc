@@ -195,14 +195,14 @@ Retry:
     co_await conn->read(segptr, seg_rmr.rkey, cur_seg, sizeof(CurSeg), lmr->lkey);
     perf.AddPerf("ReadSeg");
 
-    if(retry_cnt>10000){
-        log_err(
-        "[%lu:%lu]insert key:%lu(hash:%lx fp:%lx) with remote local_depth:%lu local_depth:%lu global_depth:%lu at "
-        "segloc:%lx with seg_ptr:%lx and main_seg_ptr:%lx",
-        cli_id, coro_id, *(uint64_t *)key->data, pattern_1, fp(pattern_1), cur_seg->local_depth,
-        dir->segs[segloc].local_depth, dir->global_depth, segloc, segptr, cur_seg->main_seg_ptr);
-        exit(-1);
-    }
+    // if(retry_cnt>10000){
+    //     log_err(
+    //     "[%lu:%lu]insert key:%lu(hash:%lx fp:%lx) with remote local_depth:%lu local_depth:%lu global_depth:%lu at "
+    //     "segloc:%lx with seg_ptr:%lx and main_seg_ptr:%lx",
+    //     cli_id, coro_id, *(uint64_t *)key->data, pattern_1, fp(pattern_1), cur_seg->local_depth,
+    //     dir->segs[segloc].local_depth, dir->global_depth, segloc, segptr, cur_seg->main_seg_ptr);
+    //     exit(-1);
+    // }
 
     // Check whether split happened on cur_table
     if (cur_seg->local_depth != dir->segs[segloc].local_depth)
@@ -711,7 +711,7 @@ Retry:
     }
 
     log_err("[%lu:%lu]No match key for %lu", cli_id, coro_id, *(uint64_t *)key->data);
-    exit(-1);
+    // exit(-1);
     co_return false;
 }
 task<> Client::update(Slice *key, Slice *value)

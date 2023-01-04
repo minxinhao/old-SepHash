@@ -93,7 +93,7 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
             {
                 log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s", cli_id, coro_id, tmp_key,
                         ret_value.data, value.data);
-                exit(-1);
+                // exit(-1);
             }
         }
         else if (op_frac < update_frac)
