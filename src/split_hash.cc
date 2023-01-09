@@ -196,11 +196,11 @@ Retry:
     perf.AddPerf("ReadSeg");
 
     // if(retry_cnt>10000){
-    //     log_err(
-    //     "[%lu:%lu]insert key:%lu(hash:%lx fp:%lx) with remote local_depth:%lu local_depth:%lu global_depth:%lu at "
-    //     "segloc:%lx with seg_ptr:%lx and main_seg_ptr:%lx",
-    //     cli_id, coro_id, *(uint64_t *)key->data, pattern_1, fp(pattern_1), cur_seg->local_depth,
-    //     dir->segs[segloc].local_depth, dir->global_depth, segloc, segptr, cur_seg->main_seg_ptr);
+        // log_err(
+        // "[%lu:%lu]insert key:%lu(hash:%lx fp:%lx) with remote local_depth:%lu local_depth:%lu global_depth:%lu at "
+        // "segloc:%lx with seg_ptr:%lx and main_seg_ptr:%lx",
+        // cli_id, coro_id, *(uint64_t *)key->data, pattern_1, fp(pattern_1), cur_seg->local_depth,
+        // dir->segs[segloc].local_depth, dir->global_depth, segloc, segptr, cur_seg->main_seg_ptr);
     //     exit(-1);
     // }
 
