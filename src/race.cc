@@ -62,6 +62,7 @@ RACEServer::RACEServer(Config &config) : dev("mlx5_0", 1, config.roce_flag), ser
     dir = (Directory *)alloc.alloc(sizeof(Directory));
     memset(dir, 0, sizeof(Directory));
     Init(dir);
+    log_err("init");
     ser.start_serve();
 }
 
@@ -128,7 +129,7 @@ RACEClient::~RACEClient()
 
 task<> RACEClient::reset_remote()
 {
-    dir->print();
+    // dir->print();
     //模拟远端分配器信息
     Alloc server_alloc;
     server_alloc.Set((char *)rmr.raddr, rmr.rlen);
