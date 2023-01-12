@@ -184,6 +184,7 @@ class Client : public BasicDB
 
     // Statistic
     Perf perf;
+    uint64_t op_cnt;
 
     // Data part
     Directory *dir;
@@ -191,7 +192,7 @@ class Client : public BasicDB
 
 class Server : public BasicDB
 {
-  public:
+ public:
     Server(Config &config);
     ~Server();
 

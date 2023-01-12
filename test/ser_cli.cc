@@ -8,7 +8,7 @@
 #include "split_hash_idle.h"
 #include <set>
 #include <stdint.h>
-#define ORDERED_INSERT
+// #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
 using ClientType = SPLIT_HASH::Client;
