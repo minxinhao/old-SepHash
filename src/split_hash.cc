@@ -165,7 +165,7 @@ task<> Client::sync_dir()
 task<> Client::insert(Slice *key, Slice *value)
 {
     op_cnt++;
-    uint64_t op_size = (1<<20); // 为每个操作保留的空间，1MB够用了
+    uint64_t op_size = (1<<20)*10; // 为每个操作保留的空间，1MB够用了
     if(op_cnt%2){
         alloc.ReSet(sizeof(Directory)+op_size);
     }else{
@@ -458,7 +458,6 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
                 log_err("Exceed MAX_DEPTH");
                 exit(-1);
             }
-            log_err("[%lu:%lu]Global Split For Depth:%lu At Segloc:%lu with old_seg_ptr:%lx new_cur_ptr:%lx",cli_id,coro_id,local_depth,seg_loc,seg_ptr,new_cur_ptr);
             dir->segs[seg_loc].main_seg_ptr = old_seg->main_seg_ptr;
             dir->segs[seg_loc].main_seg_len = old_seg->main_seg_len;
             dir->segs[seg_loc].local_depth = local_depth + 1;
@@ -484,7 +483,6 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
         {
             // Local split: Edit all directory share this seg_ptr
             // 笔记见备忘录
-            log_err("[%lu:%lu]Local Split For LocalDepth:%lu GlobalDepth:%lu At Segloc:%lu with old_seg_ptr:%lx new_cur_ptr:%lx",cli_id,coro_id,local_depth,dir->global_depth,seg_loc,seg_ptr,new_cur_ptr);
             uint64_t stride = (1llu) << (dir->global_depth - local_depth);
             uint64_t cur_seg_loc;
             for (uint64_t i = 0; i < stride; i++)
@@ -492,7 +490,6 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
                 cur_seg_loc = (i << local_depth) | first_seg_loc;
                 if (i & 1)
                 {
-                    log_err("[%lu:%lu]Local Split For LocalDepth:%lu GlobalDepth:%lu At Segloc:%lu with old_seg_ptr:%lx new_cur_ptr:%lx",cli_id,coro_id,local_depth,dir->global_depth,cur_seg_loc,dir->segs[cur_seg_loc].cur_seg_ptr,new_cur_ptr);
                     dir->segs[cur_seg_loc].cur_seg_ptr = new_cur_ptr;
                     dir->segs[cur_seg_loc].main_seg_ptr = new_cur_seg->main_seg_ptr;
                     dir->segs[cur_seg_loc].main_seg_len = new_cur_seg->main_seg_len;
@@ -500,7 +497,6 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
                 }
                 else
                 {
-                    log_err("[%lu:%lu]Local Split For LocalDepth:%lu GlobalDepth:%lu At Segloc:%lu with old_seg_ptr:%lx new_cur_ptr:%lx",cli_id,coro_id,local_depth,dir->global_depth,cur_seg_loc,dir->segs[cur_seg_loc].cur_seg_ptr,seg_ptr);
                     dir->segs[cur_seg_loc].cur_seg_ptr = seg_ptr;
                     dir->segs[cur_seg_loc].main_seg_ptr = old_seg->main_seg_ptr;
                     dir->segs[cur_seg_loc].main_seg_len = old_seg->main_seg_len;
@@ -515,7 +511,6 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
         old_seg->split_lock = 0;
         co_await conn->write(seg_ptr+sizeof(uint64_t), seg_rmr.rkey, ((uint64_t*)old_seg)+1, 3 * sizeof(uint64_t), lmr->lkey);
         co_await conn->write(seg_ptr, seg_rmr.rkey, &old_seg->split_lock,sizeof(uint64_t), lmr->lkey);
-        log_err("[%lu:%lu]End Split For LocalDepth:%lu GlobalDepth:%lu At Segloc:%lu and New LocalDepth:%lu",cli_id,coro_id,local_depth,dir->global_depth,seg_loc,old_seg->local_depth);
     }
     else
     {
