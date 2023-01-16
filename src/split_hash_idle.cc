@@ -74,10 +74,8 @@ Client::Client(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn
 
     // alloc info
     alloc.Set((char *)lmr->addr, lmr->length);
-    printf("laddr:%lx llen:%lx\n", (uint64_t)lmr->addr, lmr->length);
     seg_rmr = cli->run(conn->query_remote_mr(233));
     lock_rmr = cli->run(conn->query_remote_mr(234));
-    printf("raddr:%lx rlen:%lx rend:%lx\n", (uint64_t)seg_rmr.raddr, seg_rmr.rlen, seg_rmr.raddr + seg_rmr.rlen);
     uint64_t rbuf_size = (seg_rmr.rlen - (1ul << 30) * 5) /
                          (config.num_machine * config.num_cli * config.num_coro); // 头部保留5GB，其他的留给client
     ralloc.SetRemote(

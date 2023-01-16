@@ -86,6 +86,13 @@ KVBlock *InitKVBlock(Slice *key, Slice *value, Alloc *alloc)
     return kv_block;
 }
 
+struct CurSegMeta{
+    uint8_t sign : 1; // 实际中的split_lock可以和sign、depth合并，这里为了不降rdma驱动版本就没有合并。
+    uint64_t local_depth : 63;
+    uintptr_t main_seg_ptr;
+    uintptr_t main_seg_len;
+}__attribute__((aligned(8)));
+
 struct CurSeg
 {
     uint64_t split_lock;
@@ -94,7 +101,7 @@ struct CurSeg
     uintptr_t main_seg_ptr;
     uintptr_t main_seg_len;
     Slot slots[SLOT_PER_SEG];
-};
+}__attribute__((aligned(8)));
 
 struct MainSeg
 {
@@ -181,6 +188,7 @@ class Client : public BasicDB
     uint64_t machine_id;
     uint64_t cli_id;
     uint64_t coro_id;
+    uint64_t key_num;
 
     // Statistic
     Perf perf;
