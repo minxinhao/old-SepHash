@@ -678,7 +678,7 @@ task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *valu
     uint64_t slot;
     if (co_await search_bucket(key, value, slot_ptr, slot, buc_data, bucptr_1, bucptr_2, pattern_1))
         co_return std::make_tuple(slot_ptr, slot);
-    // log_err("[%lu:%lu]No match key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
+    log_err("[%lu:%lu]No match key :%lu", cli_id, coro_id, *(uint64_t *)key->data);
     co_return std::make_tuple(0ull, 0);
 }
 
