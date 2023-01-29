@@ -194,7 +194,7 @@ Retry:
     perf.AddPerf("ReadSeg");
 
     // Check whether split happened on cur_table
-    if (cur_seg->local_depth != dir->segs[segloc].local_depth)
+    if (cur_seg->local_depth != dir->segs[segloc].local_depth || dir->global_depth < cur_seg->local_depth)
     {
         co_await sync_dir();
         goto Retry;
@@ -601,7 +601,30 @@ Retry:
             }
         }
     }
-
+    if (res == nullptr){
+        //不带fp2再查一遍，有可能fp2没写入成功就被merge/split了
+        // log_err("Main");
+        for (uint64_t i = 0; i < end_pos - start_pos; i++)
+        {
+            // main_seg[i].print();
+            if (main_seg[i] != 0 && main_seg[i].fp == tmp_fp)
+            {
+                co_await conn->read(ralloc.ptr(main_seg[i].offset), seg_rmr.rkey, kv_block,
+                                    (main_seg[i].len) * ALIGNED_SIZE, lmr->lkey);
+                // log_err("[%lu:%lu:%lu] read %lu at
+                // main_seg:%lu",cli_id,coro_id,key_num,*(uint64_t*)kv_block->data,i+end_pos);
+                if (memcmp(key->data, kv_block->data, key->len) == 0)
+                {
+                    if (kv_block->version > version || version == UINT64_MAX)
+                    {
+                        res_slot = i;
+                        version = kv_block->version;
+                        res = kv_block;
+                    }
+                }
+            }
+        }
+    }
     if (res != nullptr && res->v_len != 0)
     {
         value->len = res->v_len;

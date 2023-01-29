@@ -273,8 +273,6 @@ Retry:
     tmp->fp_2 = fp2(pattern_1);
     wo_wait_conn->pure_write(segptr + 4 * sizeof(uint64_t) + slot_id * sizeof(Slot) + sizeof(uint64_t), seg_rmr.rkey,
                              &tmp->fp_2, sizeof(uint8_t), lmr->lkey);
-    // co_await conn->write(segptr + 4 * sizeof(uint64_t) + slot_id * sizeof(Slot) + sizeof(uint64_t), seg_rmr.rkey,
-    //                          &tmp->fp_2, sizeof(uint8_t), lmr->lkey);
 
     // log_err("[%lu:%lu:%lu] write at segloc:%lx slot:%lu sign:%d with local_depth:%lu global_depth:%lu and cur_seg_ptr:%lx old_main_ptr:%lx fp2:%x offset:%lx",cli_id,coro_id,key_num,segloc,slot_id,cur_seg->sign,dir->segs[segloc].local_depth,dir->global_depth,segptr,cur_seg->main_seg_ptr,tmp->fp_2,tmp->offset);
     perf.AddPerf("WriteSlot");
@@ -370,7 +368,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
     if (dir->segs[seg_loc].main_seg_ptr != old_seg->main_seg_ptr || dir->segs[seg_loc].local_depth != local_depth)
     {
         co_await conn->cas_n(seg_ptr, seg_rmr.rkey, 1, 0);
-        co_await sync_dir();
+        co_await sync_dir(); // 注释掉这个发生search miss，性能也不提升,甚至下降
         co_return;
     }
 

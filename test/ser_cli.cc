@@ -12,9 +12,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = SPLIT_OP::Client;
-using ServerType = SPLIT_OP::Server;
-using Slice = SPLIT_OP::Slice;
+using ClientType = SPLIT_HASH_IDLE::Client;
+using ServerType = SPLIT_HASH_IDLE::Server;
+using Slice = SPLIT_HASH_IDLE::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
