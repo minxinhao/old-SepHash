@@ -6,14 +6,15 @@
 #include "race_a.h"
 #include "split_hash.h"
 #include "split_hash_idle.h"
+#include "split_op.h"
 #include <set>
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = SPLIT_HASH::Client;
-using ServerType = SPLIT_HASH::Server;
-using Slice = SPLIT_HASH::Slice;
+using ClientType = SPLIT_OP::Client;
+using ServerType = SPLIT_OP::Server;
+using Slice = SPLIT_OP::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -193,6 +194,9 @@ int main(int argc, char *argv[])
                                           config.machine_id, i, j);
                 }else if(typeid(ClientType) == typeid(SPLIT_HASH_IDLE::Client)){
                     cli = new SPLIT_HASH_IDLE::Client(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
+                                          config.machine_id, i, j);
+                }else if(typeid(ClientType) == typeid(SPLIT_OP::Client)){
+                    cli = new SPLIT_OP::Client(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
                                           config.machine_id, i, j);
                 }
                 clis.push_back(cli);
