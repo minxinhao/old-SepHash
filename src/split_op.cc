@@ -714,25 +714,6 @@ Retry:
 
     if (res == nullptr){
         //不带fp2再查一遍，有可能fp2没写入成功就被merge/split了
-        for (uint64_t i = 0; i < SLOT_PER_SEG; i++)
-        {
-            // cur_seg->slots[i].print();
-            if (cur_seg->slots[i] != 0 && cur_seg->slots[i].fp == tmp_fp && cur_seg->slots[i].dep == dep_info )
-            {
-                co_await conn->read(ralloc.ptr(cur_seg->slots[i].offset), seg_rmr.rkey, kv_block,
-                                    (cur_seg->slots[i].len) * ALIGNED_SIZE, lmr->lkey);
-                // log_err("[%lu:%lu:%lu] read %lu at cur_seg",cli_id,coro_id,key_num,*(uint64_t*)kv_block->data);
-                if (memcmp(key->data, kv_block->data, key->len) == 0)
-                {
-                    if (kv_block->version > version || version == UINT64_MAX)
-                    {
-                        res_slot = i;
-                        version = kv_block->version;
-                        res = kv_block;
-                    }
-                }
-            }
-        }
         // log_err("Main");
         for (uint64_t i = 0; i < end_pos - start_pos; i++)
         {
