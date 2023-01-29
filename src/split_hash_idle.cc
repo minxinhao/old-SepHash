@@ -389,6 +389,8 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
         old_seg->local_depth = local_depth + 1;
         old_seg->sign = !old_seg->sign; // 对old cur_seg的清空放到最后?保证同步。
         co_await conn->write(old_seg->main_seg_ptr, seg_rmr.rkey, new_seg_1, sizeof(Slot) * off1, lmr->lkey);
+         co_await conn->write(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, ((uint64_t *)old_seg) + 1, 3 * sizeof(uint64_t),
+                             lmr->lkey);
 
         uint64_t first_seg_loc = seg_loc & ((1ull << local_depth) - 1);
         uint64_t new_seg_loc = (1ull << local_depth) | first_seg_loc;
@@ -459,8 +461,8 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
         }
         co_await UnlockDir();
         old_seg->split_lock = 0;
-        co_await conn->write(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, ((char *)old_seg) + sizeof(uint64_t),
-                             3 * sizeof(uint64_t), lmr->lkey);
+        // co_await conn->write(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, ((char *)old_seg) + sizeof(uint64_t),
+        //                      3 * sizeof(uint64_t), lmr->lkey);
         co_await conn->write(seg_ptr, seg_rmr.rkey, &old_seg->split_lock, sizeof(uint64_t), lmr->lkey);
     }
     else
@@ -472,22 +474,40 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
 
         old_seg->main_seg_ptr = new_main_ptr;
         old_seg->main_seg_len = main_seg_size / sizeof(Slot) + SLOT_PER_SEG;
-        co_await conn->write(seg_ptr + 2 * sizeof(uint64_t), seg_rmr.rkey, &old_seg->main_seg_ptr, sizeof(uint64_t),
+        old_seg->sign = !old_seg->sign;
+        co_await conn->write(seg_ptr + sizeof(uint64_t), seg_rmr.rkey,((uint64_t *)old_seg) + 1, 3*sizeof(uint64_t),
                              lmr->lkey);
-
-        dir->segs[seg_loc].main_seg_ptr = new_main_ptr;
-        dir->segs[seg_loc].main_seg_len = old_seg->main_seg_len;
-        memcpy(dir->segs[seg_loc].fp, fp_info, sizeof(FpInfo) * MAX_FP_INFO);
-        co_await conn->write(seg_rmr.raddr + sizeof(uint64_t) + seg_loc * sizeof(DirEntry) + 2 * sizeof(uint64_t),
-                             seg_rmr.rkey, &dir->segs[seg_loc].main_seg_ptr,
-                             2 * sizeof(uint64_t) + sizeof(FpInfo) * MAX_FP_INFO, lmr->lkey);
+        while (co_await LockDir())
+            ;
+        uint64_t stride = (1llu) << (dir->global_depth - local_depth);
+        uint64_t cur_seg_loc;
+        uint64_t first_seg_loc = seg_loc & ((1ull << local_depth) - 1);
+        for (uint64_t i = 0; i < stride; i++)
+        {
+            cur_seg_loc = (i << local_depth) | first_seg_loc;
+            dir->segs[cur_seg_loc].main_seg_ptr = new_main_ptr;
+            dir->segs[cur_seg_loc].main_seg_len = old_seg->main_seg_len;
+            memcpy(dir->segs[cur_seg_loc].fp, fp_info, sizeof(FpInfo) * MAX_FP_INFO);
+            co_await conn->write(
+                seg_rmr.raddr + sizeof(uint64_t) + cur_seg_loc * sizeof(DirEntry) + 2 * sizeof(uint64_t), seg_rmr.rkey,
+                &dir->segs[cur_seg_loc].main_seg_ptr, 2 * sizeof(uint64_t) + sizeof(FpInfo) * MAX_FP_INFO, lmr->lkey);
+        }
+        uint64_t dir_size = (1 << dir->global_depth);
+        for (uint64_t i = 0; i < stride; i++)
+        {
+            cur_seg_loc = (i << local_depth) | first_seg_loc;
+            dir->segs[cur_seg_loc + dir_size].main_seg_ptr = new_main_ptr;
+            dir->segs[cur_seg_loc + dir_size].main_seg_len = old_seg->main_seg_len;
+            memcpy(dir->segs[cur_seg_loc + dir_size].fp, fp_info, sizeof(FpInfo) * MAX_FP_INFO);
+            co_await conn->write(seg_rmr.raddr + sizeof(uint64_t) + (cur_seg_loc + dir_size) * sizeof(DirEntry) +
+                                     2 * sizeof(uint64_t),
+                                 seg_rmr.rkey, &dir->segs[cur_seg_loc + dir_size].main_seg_ptr,
+                                 2 * sizeof(uint64_t) + sizeof(FpInfo) * MAX_FP_INFO, lmr->lkey);
+        }
+        co_await UnlockDir();
 
         // 1.4 FreeLock && Change Sign
         old_seg->split_lock = 0;
-        old_seg->sign = !old_seg->sign;
-        // co_await conn->write(seg_ptr, seg_rmr.rkey, old_seg, 4 * sizeof(uint64_t), lmr->lkey);
-        co_await conn->write(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, ((char *)old_seg) + sizeof(uint64_t),
-                             3 * sizeof(uint64_t), lmr->lkey);
         co_await conn->write(seg_ptr, seg_rmr.rkey, &old_seg->split_lock, sizeof(uint64_t), lmr->lkey);
     }
     // log_err("[%lu:%lu] split end",cli_id,coro_id);
