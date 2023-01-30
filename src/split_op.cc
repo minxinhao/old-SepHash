@@ -264,8 +264,7 @@ Retry:
     {
         if (retry_cnt > 10000 && retry_cnt % 10000 == 0)
         {
-            log_err("kvblock_ptr:%lx slot:%lu slot_ptr:%lx", kvblock_ptr, (uint64_t)(cur_seg->slots[slot_id]),
-                    segptr + 4 * sizeof(uint64_t) + slot_id * sizeof(Slot));
+            log_err("[%lu:%lu:%lu] fail write at segloc:%lx slot:%lu sign:%d with local_depth:%lu global_depth:%lu and cur_seg_ptr:%lx old_main_ptr:%lx fp2:%x offset:%lx",cli_id,coro_id,this->key_num,segloc,slot_id,cur_seg->sign,dir->segs[segloc].local_depth,dir->global_depth,segptr,cur_seg->main_seg_ptr,tmp->fp_2,tmp->offset);
         }
         perf.AddPerf("WriteSlot");
         goto Retry;
@@ -362,6 +361,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
     // 1.1 判断main_seg_ptr是否变化;所有的split操作都会修改main_seg_ptr
     CurSegMeta *seg_meta = (CurSegMeta *)alloc.alloc(sizeof(CurSegMeta));
     co_await conn->read(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 3 * sizeof(uint64_t), lmr->lkey);
+    // 经测试，就是这里的重置限制了性能
     dir->segs[seg_loc].main_seg_ptr = seg_meta->main_seg_ptr;
     dir->segs[seg_loc].main_seg_len = seg_meta->main_seg_len;
     dir->segs[seg_loc].local_depth = seg_meta->local_depth;
@@ -391,13 +391,14 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
         // Split Main Segment
         MainSeg *new_seg_1 = (MainSeg *)alloc.alloc(main_seg_size + sizeof(Slot) * SLOT_PER_SEG);
         MainSeg *new_seg_2 = (MainSeg *)alloc.alloc(main_seg_size + sizeof(Slot) * SLOT_PER_SEG);
-        bool dep_bit;
+        bool dep_bit = false;
         uint64_t dep_off = (local_depth) % 4;
         uint64_t pattern_1;
         uint64_t off1 = 0, off2 = 0;
         KVBlock *kv_block = (KVBlock *)alloc.alloc(7 * ALIGNED_SIZE);
         for (uint64_t i = 0; i < (SLOT_PER_SEG + dir->segs[seg_loc].main_seg_len); i++)
         {
+            // dep_bit = !dep_bit; // 经测试，split_op的insert性能是由并发策略影响的，而不是read kv
             dep_bit = (new_main_seg->slots[i].dep >> dep_off) & 1;
             if (dep_off == 3)
             {

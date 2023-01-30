@@ -20,7 +20,7 @@ namespace SPLIT_OP
 {
 constexpr uint64_t SEGMENT_SIZE = 1024;
 constexpr uint64_t SLOT_PER_SEG = ((SEGMENT_SIZE - 4 * sizeof(uint64_t)) / (sizeof(uint64_t)+sizeof(uint8_t)));
-constexpr uint64_t MAX_MAIN_SIZE = 16 * SLOT_PER_SEG;
+constexpr uint64_t MAX_MAIN_SIZE = 64 * SLOT_PER_SEG;
 constexpr uint64_t MAX_FP_INFO = 256;
 constexpr uint64_t INIT_DEPTH = 4;
 constexpr uint64_t MAX_DEPTH = 14;

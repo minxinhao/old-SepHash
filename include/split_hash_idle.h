@@ -82,6 +82,13 @@ KVBlock *InitKVBlock(Slice *key, Slice *value, Alloc *alloc)
     return kv_block;
 }
 
+struct CurSegMeta{
+    uint8_t sign : 1; // 实际中的split_lock可以和sign、depth合并，这里为了不降rdma驱动版本就没有合并。
+    uint64_t local_depth : 63;
+    uintptr_t main_seg_ptr;
+    uintptr_t main_seg_len;
+}__attribute__((aligned(1)));
+
 struct CurSeg
 {
     uint64_t split_lock;
