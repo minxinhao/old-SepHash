@@ -359,12 +359,14 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg)
     }
 
     // 1.1 判断main_seg_ptr是否变化;所有的split操作都会修改main_seg_ptr
-    CurSegMeta *seg_meta = (CurSegMeta *)alloc.alloc(sizeof(CurSegMeta));
-    co_await conn->read(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 3 * sizeof(uint64_t), lmr->lkey);
-    // 经测试，就是这里的重置限制了性能
-    dir->segs[seg_loc].main_seg_ptr = seg_meta->main_seg_ptr;
-    dir->segs[seg_loc].main_seg_len = seg_meta->main_seg_len;
-    dir->segs[seg_loc].local_depth = seg_meta->local_depth;
+    // CurSegMeta *seg_meta = (CurSegMeta *)alloc.alloc(sizeof(CurSegMeta));
+    // co_await conn->read(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 3 * sizeof(uint64_t), lmr->lkey);
+    // // 经测试，就是这里的重置限制了性能
+    // dir->segs[seg_loc].main_seg_ptr = seg_meta->main_seg_ptr;
+    // dir->segs[seg_loc].main_seg_len = seg_meta->main_seg_len;
+    // dir->segs[seg_loc].local_depth = seg_meta->local_depth;
+    co_await conn->read(seg_ptr + 2 * sizeof(uint64_t), seg_rmr.rkey, &dir->segs[seg_loc].main_seg_ptr,
+                        2 * sizeof(uint64_t), lmr->lkey);
     if (dir->segs[seg_loc].main_seg_ptr != old_seg->main_seg_ptr || dir->segs[seg_loc].local_depth != local_depth)
     {
         co_await conn->cas_n(seg_ptr, seg_rmr.rkey, 1, 0);
