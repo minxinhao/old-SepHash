@@ -206,16 +206,19 @@ Retry:
     // TODO: 改成 no_wait
     perf.StartPerf();
     uint64_t *version = (uint64_t *)alloc.alloc(sizeof(uint64_t));
-    co_await conn->fetch_add(version_ptr, lock_rmr.rkey, *version, 1);
+    // co_await conn->fetch_add(version_ptr, lock_rmr.rkey, *version, 1);
+    auto fetch_ver =  wo_wait_conn->fetch_add(version_ptr, lock_rmr.rkey, *version, 1);
     kv_block->version = *version;
-    wo_wait_conn->pure_write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey); // write kv
-    perf.AddPerf("FaddVer");
 
     // read segment
     perf.StartPerf();
     CurSeg *cur_seg = (CurSeg *)alloc.alloc(sizeof(CurSeg));
     co_await conn->read(segptr, seg_rmr.rkey, cur_seg, sizeof(CurSeg), lmr->lkey);
     perf.AddPerf("ReadSeg");
+
+    co_await std::move(fetch_ver);
+    wo_wait_conn->pure_write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey); // write kv
+    perf.AddPerf("FaddVer");
 
     // Check whether split happened on cur_table
     if (cur_seg->local_depth != dir->segs[segloc].local_depth || dir->global_depth < cur_seg->local_depth)
