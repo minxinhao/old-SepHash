@@ -631,10 +631,6 @@ Retry:
     uint64_t base_index = 0;
     uint64_t base_off = 0;
 
-    // Read Segment
-    CurSeg *cur_seg = (CurSeg *)alloc.alloc(sizeof(CurSeg));
-    auto read_cur_seg = conn->read(cur_seg_ptr, seg_rmr.rkey, cur_seg, sizeof(CurSeg), lmr->lkey);
-
     uint64_t start_pos = 0;
     uint64_t end_pos = main_seg_len;
     for (uint64_t i = 0; i <= UINT8_MAX; i++)
@@ -652,47 +648,15 @@ Retry:
         conn->read(main_seg_ptr + start_pos * sizeof(Slot), seg_rmr.rkey, main_seg, main_size, lmr->lkey);
 
     co_await std::move(read_main_seg);
-    co_await std::move(read_cur_seg);
-
-    // Check Depth && MainSeg
-    if (dir->segs[segloc].local_depth != cur_seg->local_depth || cur_seg->main_seg_ptr != main_seg_ptr)
-    {
-        log_err("[%lu:%lu:%lu]Inconsistent Depth at segloc:%lx with local local_depth:%lu remote local_depth:%lu and "
-                "global_depth:%lu seg_ptr:%lx local main_seg_ptr:%lx remote main_seg_ptr:%lx",
-                cli_id, coro_id, key_num, segloc, dir->segs[segloc].local_depth, cur_seg->local_depth,
-                dir->global_depth, cur_seg_ptr, dir->segs[segloc].main_seg_ptr, cur_seg->main_seg_ptr);
-        co_await sync_dir();
-        goto Retry;
-    }
 
     // Find Slot && Read KV
     uint64_t version = UINT64_MAX;
     uint64_t res_slot = UINT64_MAX;
     KVBlock *res = nullptr;
     KVBlock *kv_block = (KVBlock *)alloc.alloc(7 * ALIGNED_SIZE);
-    uint64_t dep = cur_seg->local_depth - (cur_seg->local_depth % 4); // 按4对齐
+    uint64_t dep = dir->segs[segloc].local_depth - (dir->segs[segloc].local_depth % 4); // 按4对齐
     uint8_t dep_info = (pattern_1 >> dep) & 0xf;
-    // log_err("CurSeg");
-    for (uint64_t i = 0; i < SLOT_PER_SEG; i++)
-    {
-        // cur_seg->slots[i].print();
-        if (cur_seg->slots[i] != 0 && cur_seg->slots[i].fp == tmp_fp && cur_seg->slots[i].dep == dep_info &&
-            cur_seg->slots[i].fp_2 == fp2(pattern_1))
-        {
-            co_await conn->read(ralloc.ptr(cur_seg->slots[i].offset), seg_rmr.rkey, kv_block,
-                                (cur_seg->slots[i].len) * ALIGNED_SIZE, lmr->lkey);
-            // log_err("[%lu:%lu:%lu] read %lu at cur_seg",cli_id,coro_id,key_num,*(uint64_t*)kv_block->data);
-            if (memcmp(key->data, kv_block->data, key->len) == 0)
-            {
-                if (kv_block->version > version || version == UINT64_MAX)
-                {
-                    res_slot = i;
-                    version = kv_block->version;
-                    res = kv_block;
-                }
-            }
-        }
-    }
+
     // log_err("Main");
     for (uint64_t i = 0; i < end_pos - start_pos; i++)
     {
@@ -740,6 +704,47 @@ Retry:
             }
         }
     }
+
+    if(res == nullptr){
+        // Read Segment
+        CurSeg *cur_seg = (CurSeg *)alloc.alloc(sizeof(CurSeg));
+        auto read_cur_seg = conn->read(cur_seg_ptr, seg_rmr.rkey, cur_seg, sizeof(CurSeg), lmr->lkey);
+        co_await std::move(read_cur_seg);
+        
+        // Check Depth && MainSeg
+        if (dir->segs[segloc].local_depth != cur_seg->local_depth || cur_seg->main_seg_ptr != main_seg_ptr)
+        {
+            log_err("[%lu:%lu:%lu]Inconsistent Depth at segloc:%lx with local local_depth:%lu remote local_depth:%lu and "
+                    "global_depth:%lu seg_ptr:%lx local main_seg_ptr:%lx remote main_seg_ptr:%lx",
+                    cli_id, coro_id, key_num, segloc, dir->segs[segloc].local_depth, cur_seg->local_depth,
+                    dir->global_depth, cur_seg_ptr, dir->segs[segloc].main_seg_ptr, cur_seg->main_seg_ptr);
+            co_await sync_dir();
+            goto Retry;
+        }
+
+        // log_err("CurSeg");
+        for (uint64_t i = 0; i < SLOT_PER_SEG; i++)
+        {
+            // cur_seg->slots[i].print();
+            if (cur_seg->slots[i] != 0 && cur_seg->slots[i].fp == tmp_fp && cur_seg->slots[i].dep == dep_info &&
+                cur_seg->slots[i].fp_2 == fp2(pattern_1))
+            {
+                co_await conn->read(ralloc.ptr(cur_seg->slots[i].offset), seg_rmr.rkey, kv_block,
+                                    (cur_seg->slots[i].len) * ALIGNED_SIZE, lmr->lkey);
+                // log_err("[%lu:%lu:%lu] read %lu at cur_seg",cli_id,coro_id,key_num,*(uint64_t*)kv_block->data);
+                if (memcmp(key->data, kv_block->data, key->len) == 0)
+                {
+                    if (kv_block->version > version || version == UINT64_MAX)
+                    {
+                        res_slot = i;
+                        version = kv_block->version;
+                        res = kv_block;
+                    }
+                }
+            }
+        }
+    }
+
     if (res != nullptr && res->v_len != 0)
     {
         value->len = res->v_len;
@@ -751,6 +756,11 @@ Retry:
             "main_seg_ptr:%lx",
             cli_id, coro_id, key_num, segloc, dir->segs[segloc].local_depth, dir->global_depth, cur_seg_ptr,
             dir->segs[segloc].main_seg_ptr);
+    
+    // std::string tmp_value = std::string(32, '1');
+    // value->len = tmp_value.length();
+    // memcpy(value->data,(char *)tmp_value.data(),value->len);
+
     co_return false;
 }
 task<> Client::update(Slice *key, Slice *value)
