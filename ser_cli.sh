@@ -12,7 +12,7 @@ then
     --mem_size 21474836480 
 else
     echo "machine" $1
-    for num_cli in `seq 0 4`;do
+    for num_cli in `seq 4 4`;do
         for num_coro in `seq 1 4`;do
             echo "num_cli" $((1<<$num_cli)) "num_coro" $num_coro 
             ./ser_cli \

@@ -126,6 +126,7 @@ struct DirEntry
     uintptr_t cur_seg_ptr ;
     uintptr_t main_seg_ptr ;
     uint64_t main_seg_len ;
+    // uint8_t offset ; //记录当前CurSeg中的freeslot开头？仅作参考，还是每个cli进行随机read
     FpInfo fp[MAX_FP_INFO];
     bool operator==(const DirEntry &other) const
     {
