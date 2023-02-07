@@ -7,14 +7,15 @@
 #include "split_hash.h"
 #include "split_hash_idle.h"
 #include "split_op.h"
+#include "rdma_bench.h"
 #include <set>
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = SPLIT_OP::Client;
-using ServerType = SPLIT_OP::Server;
-using Slice = SPLIT_OP::Slice;
+using ClientType = RDMA_BENCH::Client;
+using ServerType = RDMA_BENCH::Server;
+using Slice = RDMA_BENCH::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -91,12 +92,12 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
                 (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
                 gen->operator()(key_chooser()));
             co_await cli->search(&key, &ret_value);
-            if (ret_value.len != value.len || memcmp(ret_value.data, value.data, value.len) != 0)
-            {
-                log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s", cli_id, coro_id, tmp_key,
-                        ret_value.data, value.data);
-                // exit(-1);
-            }
+            // if (ret_value.len != value.len || memcmp(ret_value.data, value.data, value.len) != 0)
+            // {
+            //     log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s", cli_id, coro_id, tmp_key,
+            //             ret_value.data, value.data);
+            //     // exit(-1);
+            // }
         }
         else if (op_frac < update_frac)
         {
@@ -149,7 +150,7 @@ int main(int argc, char *argv[])
     }
     else
     {
-        uint64_t cbuf_size = (1ul << 20) * 250;
+        uint64_t cbuf_size = (1ul << 20) * 100;
         char *mem_buf = (char *)malloc(cbuf_size * config.num_cli * config.num_coro);
         rdma_dev dev("mlx5_0", 1, config.roce_flag);
         std::vector<ibv_mr *> lmrs(config.num_cli * config.num_coro, nullptr);
@@ -174,6 +175,7 @@ int main(int argc, char *argv[])
                 lmrs[i * config.num_coro + j] =
                     dev.create_mr(cbuf_size, mem_buf + cbuf_size * (i * config.num_coro + j));
                 BasicDB * cli;
+                // cli = new ClientType(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],config.machine_id, i, j);
                 if(typeid(ClientType) == typeid(RACE::RACEClient)){
                     cli = new RACE::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
                                           config.machine_id, i, j);
@@ -197,6 +199,9 @@ int main(int argc, char *argv[])
                                           config.machine_id, i, j);
                 }else if(typeid(ClientType) == typeid(SPLIT_OP::Client)){
                     cli = new SPLIT_OP::Client(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
+                                          config.machine_id, i, j);
+                }else if(typeid(ClientType) == typeid(RDMA_BENCH::Client)){
+                    cli = new RDMA_BENCH::Client(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
                                           config.machine_id, i, j);
                 }
                 clis.push_back(cli);

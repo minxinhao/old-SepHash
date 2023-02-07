@@ -80,6 +80,8 @@
         "queue": "cpp",
         "shared_mutex": "cpp",
         "ios": "cpp",
-        "cassert": "cpp"
+        "cassert": "cpp",
+        "version": "cpp",
+        "locale": "cpp"
     }
 }
