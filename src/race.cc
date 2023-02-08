@@ -109,7 +109,7 @@ RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_con
     log_info("laddr:%lx llen:%lx", (uint64_t)lmr->addr, lmr->length);
     rmr = cli->run(conn->query_remote_mr(233));
     log_info("raddr:%lx rlen:%lx rend:%lx", (uint64_t)rmr.raddr, rmr.rlen, rmr.raddr + rmr.rlen);
-    uint64_t rbuf_size = (rmr.rlen - (1ul << 30) * 5) /
+    uint64_t rbuf_size = (rmr.rlen - (1ul << 20) * 10) /
                          (config.num_machine * config.num_cli * config.num_coro); // 头部保留5GB，其他的留给client
     ralloc.SetRemote(
         rmr.raddr + rmr.rlen -
