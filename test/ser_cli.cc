@@ -13,9 +13,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = RACE::RACEClient;
-using ServerType = RACE::RACEServer;
-using Slice = RACE::Slice;
+using ClientType = RDMA_BENCH::Client;
+using ServerType = RDMA_BENCH::Server;
+using Slice = RDMA_BENCH::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -181,27 +181,6 @@ int main(int argc, char *argv[])
                 //                           config.machine_id, i, j);
                 // }else if(typeid(ClientType) == typeid(RACEOP::RACEClient)){
                 //     cli = new RACEOP::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
-                //                           config.machine_id, i, j);
-                // }else if(typeid(ClientType) == typeid(RACE_SHARE_DIR::RACEClient)){
-                //     cli = new RACE_SHARE_DIR::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
-                //                           config.machine_id, i, j,dir_mr,&dir_lock);
-                // }else if(typeid(ClientType) == typeid(RACEIDLE::RACEClient)){
-                //     cli = new RACEIDLE::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
-                //                           config.machine_id, i, j);
-                // }else if(typeid(ClientType) == typeid(RACEA::RACEClient)){
-                //     cli = new RACEA::RACEClient(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
-                //                           config.machine_id, i, j);
-                // }else if(typeid(ClientType) == typeid(SPLIT_HASH::Client)){
-                //     cli = new SPLIT_HASH::Client(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
-                //                           config.machine_id, i, j);
-                // }else if(typeid(ClientType) == typeid(SPLIT_HASH_IDLE::Client)){
-                //     cli = new SPLIT_HASH_IDLE::Client(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
-                //                           config.machine_id, i, j);
-                // }else if(typeid(ClientType) == typeid(SPLIT_OP::Client)){
-                //     cli = new SPLIT_OP::Client(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
-                //                           config.machine_id, i, j);
-                // }else if(typeid(ClientType) == typeid(RDMA_BENCH::Client)){
-                //     cli = new RDMA_BENCH::Client(config, lmrs[i * config.num_coro + j], rdma_clis[i], rdma_conns[i],rdma_wowait_conns[i],
                 //                           config.machine_id, i, j);
                 // }
                 clis.push_back(cli);

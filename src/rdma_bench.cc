@@ -36,6 +36,7 @@ Server::~Server()
 Client::Client(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn, rdma_conn *_wowait_conn,
                uint64_t _machine_id, uint64_t _cli_id, uint64_t _coro_id)
 {
+    read_size = config.read_size;
     // id info
     machine_id = _machine_id;
     cli_id = _cli_id;
@@ -95,7 +96,7 @@ task<> Client::stop()
 
 task<> Client::insert(Slice *key, Slice *value)
 {
-    uint64_t op_size = 64; // 64 bytes
+    uint64_t op_size = read_size; // 64 bytes
     this->key_num = *(uint64_t *)key->data;
     // log_err("[%lu:%lu:%lu]",cli_id,coro_id,this->key_num);
     uintptr_t ptr = seg_rmr.raddr + sizeof(Directory) + (this->key_num % 1000) * op_size;
@@ -104,7 +105,7 @@ task<> Client::insert(Slice *key, Slice *value)
 
 task<bool> Client::search(Slice *key, Slice *value)
 {
-    uint64_t op_size = 64; // 64 bytes
+    uint64_t op_size = read_size; // 64 bytes
     this->key_num = *(uint64_t *)key->data;
     // log_err("[%lu:%lu:%lu]",cli_id,coro_id,this->key_num);
     uintptr_t ptr = seg_rmr.raddr + sizeof(Directory) + (this->key_num % 1000) * op_size;

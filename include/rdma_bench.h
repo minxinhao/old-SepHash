@@ -96,8 +96,8 @@ class Client : public BasicDB
     uint64_t machine_id;
     uint64_t cli_id;
     uint64_t coro_id;
+    uint64_t read_size;
     uint64_t key_num;
-    uint64_t key_off;
 
     // Statistic
     Perf perf;
