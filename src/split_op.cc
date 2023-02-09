@@ -616,6 +616,7 @@ task<int> Client::LockDir()
     {
         co_return 0;
     }
+    int a = 1; //不知道为啥在33上不加点东西这个函数会卡住
     co_return 1;
 }
 task<> Client::UnlockDir()

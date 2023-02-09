@@ -13,9 +13,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = RDMA_BENCH::Client;
-using ServerType = RDMA_BENCH::Server;
-using Slice = RDMA_BENCH::Slice;
+using ClientType = RACE::RACEClient;
+using ServerType = RACE::RACEServer;
+using Slice = RACE::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {

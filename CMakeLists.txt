@@ -22,7 +22,8 @@ link_directories(
 AUX_SOURCE_DIRECTORY ("src" src)
 list(REMOVE_ITEM src "src/search.cc")
 
-set(libs "-lmkl_intel_ilp64 -lmkl_sequential -lmkl_core -lpthread -lm -ldl -libverbs -lpthread" )
+# set(libs "-lmkl_intel_ilp64 -lmkl_sequential -lmkl_core -lpthread -lm -ldl -libverbs -lpthread" )
+set(libs "-lpthread -lm -ldl -libverbs -lpthread" )
 
 add_executable(bench test/bench.cc ${src} lib/search.o)
 target_link_libraries(bench PRIVATE ${libs})
