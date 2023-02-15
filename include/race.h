@@ -90,15 +90,15 @@ struct Directory
     }
 } __attribute__((aligned(8)));
 
-class RACEClient : public BasicDB
+class Client : public BasicDB
 {
   public:
-    RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn,rdma_conn *_wowait_conn, uint64_t _machine_id,
+    Client(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn,rdma_conn *_wowait_conn, uint64_t _machine_id,
                uint64_t _cli_id, uint64_t _coro_id);
 
-    RACEClient(const RACEClient &) = delete;
+    Client(const Client &) = delete;
 
-    ~RACEClient();
+    ~Client();
 
     // Used for sync operation and test
     task<> start(uint64_t total);
@@ -150,11 +150,11 @@ class RACEClient : public BasicDB
     Directory *dir;
 };
 
-class RACEServer : public BasicDB
+class Server : public BasicDB
 {
   public:
-    RACEServer(Config &config);
-    ~RACEServer();
+    Server(Config &config);
+    ~Server();
 
   private:
     void Init(Directory *dir);

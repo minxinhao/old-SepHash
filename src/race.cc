@@ -55,7 +55,7 @@ void PrintDir(Directory *dir)
     }
 }
 
-RACEServer::RACEServer(Config &config) : dev("mlx5_0", 1, config.roce_flag), ser(dev)
+Server::Server(Config &config) : dev("mlx5_0", 1, config.roce_flag), ser(dev)
 {
     lmr = dev.reg_mr(233, config.mem_size);
     alloc.Set((char *)lmr->addr, lmr->length);
@@ -66,7 +66,7 @@ RACEServer::RACEServer(Config &config) : dev("mlx5_0", 1, config.roce_flag), ser
     ser.start_serve();
 }
 
-void RACEServer::Init(Directory *dir)
+void Server::Init(Directory *dir)
 {
     dir->global_depth = INIT_DEPTH;
     dir->resize_lock = 0;
@@ -86,12 +86,12 @@ void RACEServer::Init(Directory *dir)
     }
 }
 
-RACEServer::~RACEServer()
+Server::~Server()
 {
     rdma_free_mr(lmr);
 }
 
-RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn,rdma_conn *_wowait_conn, uint64_t _machine_id,
+Client::Client(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn,rdma_conn *_wowait_conn, uint64_t _machine_id,
                        uint64_t _cli_id, uint64_t _coro_id)
 {
     // id info
@@ -122,12 +122,12 @@ RACEClient::RACEClient(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_con
     cli->run(sync_dir());
 }
 
-RACEClient::~RACEClient()
+Client::~Client()
 {
     perf.Print();
 }
 
-task<> RACEClient::reset_remote()
+task<> Client::reset_remote()
 {
     // dir->print();
     //模拟远端分配器信息
@@ -161,7 +161,7 @@ task<> RACEClient::reset_remote()
     co_await conn->write(rmr.raddr, rmr.rkey, dir, size_t(sizeof(Directory)), lmr->lkey);
 }
 
-task<> RACEClient::start(uint64_t total)
+task<> Client::start(uint64_t total)
 {
     // co_await sync_dir();
     uint64_t *start_cnt = (uint64_t *)alloc.alloc(sizeof(uint64_t), true);
@@ -175,7 +175,7 @@ task<> RACEClient::start(uint64_t total)
     }
 }
 
-task<> RACEClient::stop()
+task<> Client::stop()
 {
     uint64_t *start_cnt = (uint64_t *)alloc.alloc(sizeof(uint64_t));
     co_await conn->fetch_add(rmr.raddr + sizeof(Directory) - sizeof(uint64_t), rmr.rkey, *start_cnt, -1);
@@ -187,7 +187,7 @@ task<> RACEClient::stop()
     }
 }
 
-task<> RACEClient::insert(Slice *key, Slice *value)
+task<> Client::insert(Slice *key, Slice *value)
 {
     alloc.ReSet(sizeof(Directory));
     uint64_t pattern_1, pattern_2;
@@ -312,14 +312,14 @@ Retry:
     perf.AddPerf("IsCorrectBucket");
 }
 
-task<> RACEClient::sync_dir()
+task<> Client::sync_dir()
 {
     co_await conn->read(rmr.raddr + sizeof(uint64_t), rmr.rkey, &dir->global_depth, sizeof(uint64_t), lmr->lkey);
     co_await conn->read(rmr.raddr + sizeof(uint64_t) * 2, rmr.rkey, dir->segs,
                         (1 << dir->global_depth) * sizeof(DirEntry), lmr->lkey);
 }
 
-bool RACEClient::FindLessBucket(Bucket *buc1, Bucket *buc2)
+bool Client::FindLessBucket(Bucket *buc1, Bucket *buc2)
 {
     int buc1_tot = 0;
     int buc2_tot = 0;
@@ -339,7 +339,7 @@ bool RACEClient::FindLessBucket(Bucket *buc1, Bucket *buc2)
     return buc1_tot < buc2_tot;
 }
 
-uintptr_t RACEClient::FindEmptySlot(Bucket *buc, uint64_t buc_idx, uintptr_t buc_ptr)
+uintptr_t Client::FindEmptySlot(Bucket *buc, uint64_t buc_idx, uintptr_t buc_ptr)
 {
     Bucket *main_buc = get_main_buc(buc_idx, buc);
     Bucket *over_buc = get_over_buc(buc_idx, buc);
@@ -362,7 +362,7 @@ uintptr_t RACEClient::FindEmptySlot(Bucket *buc, uint64_t buc_idx, uintptr_t buc
     return 0ul;
 }
 
-bool RACEClient::IsCorrectBucket(uint64_t segloc, Bucket *buc, uint64_t pattern)
+bool Client::IsCorrectBucket(uint64_t segloc, Bucket *buc, uint64_t pattern)
 {
     if (buc->local_depth != dir->segs[segloc].local_depth)
     {
@@ -373,7 +373,7 @@ bool RACEClient::IsCorrectBucket(uint64_t segloc, Bucket *buc, uint64_t pattern)
     return true;
 }
 
-task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_depth, bool global_flag)
+task<int> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_depth, bool global_flag)
 {
     perf.StartPerf();
     if (local_depth == MAX_DEPTH)
@@ -525,7 +525,7 @@ task<int> RACEClient::Split(uint64_t seg_loc, uintptr_t seg_ptr, uint64_t local_
     co_return 0;
 }
 
-task<> RACEClient::MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment *seg, Segment *new_seg)
+task<> Client::MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment *seg, Segment *new_seg)
 {
     struct Bucket *cur_buc;
     uint64_t pattern_1, pattern_2, suffix;
@@ -601,7 +601,7 @@ task<> RACEClient::MoveData(uint64_t old_seg_ptr, uint64_t new_seg_ptr, Segment 
 /// @param slot
 /// @return 0-success to write slot into new_seg at bucidx
 //          1-invalid bucidx
-task<int> RACEClient::SetSlot(uint64_t buc_ptr, uint64_t slot)
+task<int> Client::SetSlot(uint64_t buc_ptr, uint64_t slot)
 {
     uint64_t slot_idx = 0;
     while (slot_idx < SLOT_PER_BUCKET)
@@ -616,7 +616,7 @@ task<int> RACEClient::SetSlot(uint64_t buc_ptr, uint64_t slot)
 
 /// @brief 设置Lock为1
 /// @return return: 0-success, 1-split conflict
-task<int> RACEClient::LockDir()
+task<int> Client::LockDir()
 {
     uint64_t lock;
     // assert((connector.get_remote_addr())%8 == 0);
@@ -627,14 +627,14 @@ task<int> RACEClient::LockDir()
     co_return 1;
 }
 
-task<> RACEClient::UnlockDir()
+task<> Client::UnlockDir()
 {
     // Set global split bit
     // assert((connector.get_remote_addr())%8 == 0);
     co_await conn->cas_n(rmr.raddr, rmr.rkey, 1, 0);
 }
 
-task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *value)
+task<std::tuple<uintptr_t, uint64_t>> Client::search(Slice *key, Slice *value)
 {
     alloc.ReSet(sizeof(Directory));
 
@@ -682,7 +682,7 @@ task<std::tuple<uintptr_t, uint64_t>> RACEClient::search(Slice *key, Slice *valu
     co_return std::make_tuple(0ull, 0);
 }
 
-task<std::tuple<uintptr_t, uint64_t>> RACEClient::search_on_resize(Slice *key, Slice *value)
+task<std::tuple<uintptr_t, uint64_t>> Client::search_on_resize(Slice *key, Slice *value)
 {
     uintptr_t slot_ptr;
     uint64_t slot;
@@ -750,7 +750,7 @@ Retry:
     co_return std::make_tuple(0ull, 0);
 }
 
-task<bool> RACEClient::search_bucket(Slice *key, Slice *value, uintptr_t &slot_ptr, uint64_t &slot, Bucket *buc_data,
+task<bool> Client::search_bucket(Slice *key, Slice *value, uintptr_t &slot_ptr, uint64_t &slot, Bucket *buc_data,
                                      uintptr_t bucptr_1, uintptr_t bucptr_2, uint64_t pattern_1)
 {
     Bucket *buc;
@@ -779,7 +779,7 @@ task<bool> RACEClient::search_bucket(Slice *key, Slice *value, uintptr_t &slot_p
     co_return false;
 }
 
-task<> RACEClient::remove(Slice *key)
+task<> Client::remove(Slice *key)
 {
     char data[1024];
     Slice ret_value;
@@ -815,7 +815,7 @@ Retry:
     }
 }
 
-task<> RACEClient::update(Slice *key,Slice *value)
+task<> Client::update(Slice *key,Slice *value)
 {
     char data[1024];
     Slice ret_value;
