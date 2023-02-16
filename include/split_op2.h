@@ -21,7 +21,6 @@ namespace SPLIT_OP2
 constexpr uint64_t SEGMENT_SIZE = 1024;
 constexpr uint64_t SLOT_PER_SEG = ((SEGMENT_SIZE) / (sizeof(uint64_t)+sizeof(uint8_t)));
 constexpr uint64_t SLOT_BATCH_SIZE = 8;
-// constexpr uint64_t SLOT_PER_SEG = ((SEGMENT_SIZE - 4 * sizeof(uint64_t)) / (sizeof(uint64_t)+sizeof(uint8_t)));
 constexpr uint64_t MAX_MAIN_SIZE = 64 * SLOT_PER_SEG;
 constexpr uint64_t MAX_FP_INFO = 256;
 constexpr uint64_t INIT_DEPTH = 4;
@@ -130,8 +129,6 @@ struct DirEntry
     uintptr_t cur_seg_ptr ;
     uintptr_t main_seg_ptr ;
     uint64_t main_seg_len ;
-    uint8_t offset ; // 记录当前CurSeg中的freeslot开头？仅作参考，还是每个cli进行随机read
-                        // 还是随机read吧，使用一个固定的序列？保存在本地，免得需要修改远端的。
     FpInfo fp[MAX_FP_INFO];
     bool operator==(const DirEntry &other) const
     {
@@ -177,7 +174,7 @@ class Client : public BasicDB
   private:
     task<> sync_dir();
 
-    task<> Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSeg *old_seg);
+    task<> Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_meta);
 
     // Global/Local并行的方式造成的等待冲突太高了，就使用简单的单个lock
     task<int> LockDir();
@@ -204,6 +201,8 @@ class Client : public BasicDB
     uint64_t op_cnt;
 
     // Data part
+    uint8_t offset[DIR_SIZE] ; // 记录当前CurSeg中的freeslot开头？仅作参考，还是每个cli进行随机read
+                        // 还是随机read吧，使用一个固定的序列？保存在本地，免得需要修改远端的。
     Directory *dir;
 };
 
