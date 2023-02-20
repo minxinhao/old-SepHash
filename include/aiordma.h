@@ -311,7 +311,8 @@ using rdma_client = rdma_worker;
 
 class [[nodiscard]] rdma_future
 {
-protected:
+public:
+// protected:
     rdma_coro *cor{nullptr};
     rdma_conn *conn{nullptr};
 

@@ -146,7 +146,7 @@ struct Directory
     void print(){
         log_err("Global_Depth:%lu",global_depth);
         for(uint64_t i = 0 ; i < (1<<global_depth) ; i++){
-            log_err("Entry %lu : local_depth:%lu cur_seg_ptr:%lx main_seg_ptr:%lx main_seg_lne:%lx",i,segs[i].local_depth,segs[i].cur_seg_ptr,segs[i].main_seg_ptr,segs[i].main_seg_len);
+            log_err("Entry %lx : local_depth:%lu cur_seg_ptr:%lx main_seg_ptr:%lx main_seg_lne:%lx",i,segs[i].local_depth,segs[i].cur_seg_ptr,segs[i].main_seg_ptr,segs[i].main_seg_len);
         }
     }
 } __attribute__((aligned(8)));
