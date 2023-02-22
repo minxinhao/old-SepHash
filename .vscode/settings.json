@@ -82,6 +82,12 @@
         "ios": "cpp",
         "cassert": "cpp",
         "version": "cpp",
-        "locale": "cpp"
+        "locale": "cpp",
+        "csignal": "cpp",
+        "cstdarg": "cpp",
+        "hash_map": "cpp",
+        "hash_set": "cpp",
+        "iomanip": "cpp",
+        "cinttypes": "cpp"
     }
 }

@@ -9,13 +9,13 @@ then
     ./ser_cli --server \
     --roce \
     --max_coro 256 --cq_size 64 \
-    --mem_size 21474836480 
+    --mem_size 26843545600 
 else
     echo "machine" $1
     for read_size in `seq 6 6`;do
         echo "read_size" $((1<<$read_size))
         for num_cli in `seq 0 0`;do
-            for num_coro in `seq 1 1`;do
+            for num_coro in `seq 2 2`;do
                 echo "num_cli" $((1<<$num_cli)) "num_coro" $num_coro 
                 ./ser_cli \
                 --server_ip 192.168.1.89 --num_machine 1 --num_cli $((1<<$num_cli)) --num_coro $num_coro \
