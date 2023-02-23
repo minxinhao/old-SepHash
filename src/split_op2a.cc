@@ -219,7 +219,7 @@ Retry:
     // read segment_meta
     CurSegMeta *curseg_meta = (CurSegMeta *)alloc.alloc(sizeof(CurSegMeta));
     auto read_meta = conn->read(segptr + sizeof(uint64_t), seg_rmr.rkey, curseg_meta, sizeof(CurSegMeta), lmr->lkey);
-    Slot *curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_BATCH_SIZE);
+    Slot *curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * 2 * SLOT_BATCH_SIZE);
 Retry2:
     retry_cnt2++;
     uintptr_t seg_offset = this->offset[segloc];
@@ -316,13 +316,16 @@ Retry2:
     auto [bit_loc, bit_info] = get_fp_bit(tmp->fp, tmp->fp_2);
     uintptr_t fp_ptr = segptr + (4 + bit_loc) * sizeof(uint64_t);
     curseg_meta->fp_bitmap[bit_loc] = curseg_meta->fp_bitmap[bit_loc] | bit_info;
-    wo_wait_conn->pure_write(fp_ptr, seg_rmr.rkey,
-                                &curseg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
-    // while ((curseg_meta->fp_bitmap[bit_loc]&bit_info)==0 &&
-    //         !co_await conn->cas(fp_ptr, seg_rmr.rkey,
-    //                         curseg_meta->fp_bitmap[bit_loc], curseg_meta->fp_bitmap[bit_loc]| bit_info))
-    // {
-    // }
+    // wo_wait_conn->pure_write(fp_ptr, seg_rmr.rkey,
+    //                             &curseg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
+    while ((curseg_meta->fp_bitmap[bit_loc]&bit_info)==0 )
+    {
+        if(co_await conn->cas(fp_ptr, seg_rmr.rkey,
+                            curseg_meta->fp_bitmap[bit_loc], curseg_meta->fp_bitmap[bit_loc]| bit_info)){
+            break;
+        }
+    }
+
     // log_err("[%lu:%lu:%lu]segloc:%lu slot_id:%lu slot_ptr:%lx kvblock_ptr:%lx  offset:%lx kvblock_len:%lu", cli_id, coro_id, this->key_num, segloc, seg_offset+slot_id,slot_ptr,kvblock_ptr,ralloc.offset(kvblock_ptr),kvblock_len);
     
 }
