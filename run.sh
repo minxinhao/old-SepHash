@@ -20,9 +20,4 @@
 # echo "mxh" | sudo -S ../ser_cli.sh 0 1>out.txt
 
 
-if [ $1 = 0 ]
-then
-    ../ser_cli.sh 0 1>out0.txt
-else
-    ./ser_cli.sh $1 1>out$1.txt
-fi
+./ser_cli.sh $1 1>out.txt

@@ -1,7 +1,6 @@
 # usage: 
 #       ./sync.sh out/in
-# clis=("192.168.1.33" "192.168.1.44" "192.168.1.51" "192.168.1.52" "192.168.1.53" "192.168.1.88" "192.168.1.69")
-clis=("192.168.1.88" "192.168.1.33" "192.168.1.51")
+clis=("192.168.1.88" "192.168.1.89" "192.168.1.33" "192.168.1.44" "192.168.1.51" "192.168.1.52" "192.168.1.53" "192.168.1.69")
 if [ "$1" = "out" ]
 then
     make
@@ -17,7 +16,8 @@ else
     for cli in ${clis[@]}
     do 
         echo "cli" $cli
-        sshpass -p 'mxh' scp mxh@$cli:/home/mxh/out$cnt.txt .
+        rm -f ./out$cli.txt
+        sshpass -p 'mxh' scp mxh@$cli:/home/mxh/out.txt ./out$cli.txt
         ((cnt += 1))
     done
 fi
