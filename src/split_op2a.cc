@@ -102,7 +102,7 @@ Client::Client(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn
             rbuf_size * (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id),
         rbuf_size, seg_rmr.raddr, seg_rmr.rlen);
     ralloc.alloc(ALIGNED_SIZE); // 提前分配ALIGNED_SIZE，免得读取的时候越界
-    log_err("ralloc start_addr:%lx offset_max:%lx", ralloc.raddr, ralloc.rsize);
+    // log_err("ralloc start_addr:%lx offset_max:%lx", ralloc.raddr, ralloc.rsize);
     op_cnt = 0;
 
     // sync dir
