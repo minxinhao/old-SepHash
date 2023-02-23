@@ -300,7 +300,7 @@ Retry2:
         co_await std::move(fetch_ver);
         goto Retry;
     }
-    if(retry_cnt1 > 2 || retry_cnt2 > 2) log_err("[%lu:%lu:%lu] retry_cnt1:%lu retry_cnt2:%lu", cli_id, coro_id, this->key_num,retry_cnt1,retry_cnt2);
+    // if(retry_cnt1 > 2 || retry_cnt2 > 2) log_err("[%lu:%lu:%lu] retry_cnt1:%lu retry_cnt2:%lu", cli_id, coro_id, this->key_num,retry_cnt1,retry_cnt2);
     
     // write kv
     co_await std::move(fetch_ver);
