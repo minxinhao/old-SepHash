@@ -9,15 +9,16 @@
 #include "split_op.h"
 #include "split_op2.h"
 #include "split_op2a.h"
+#include "split_op2b.h"
 #include "rdma_bench.h"
 #include <set>
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = SPLIT_OP2A::Client;
-using ServerType = SPLIT_OP2A::Server;
-using Slice = SPLIT_OP2A::Slice;
+using ClientType = SPLIT_OP2B::Client;
+using ServerType = SPLIT_OP2B::Server;
+using Slice = SPLIT_OP2B::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
