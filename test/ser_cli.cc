@@ -16,9 +16,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = SPLIT_OP2B::Client;
-using ServerType = SPLIT_OP2B::Server;
-using Slice = SPLIT_OP2B::Slice;
+using ClientType = SPLIT_OP2A::Client;
+using ServerType = SPLIT_OP2A::Server;
+using Slice = SPLIT_OP2A::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {

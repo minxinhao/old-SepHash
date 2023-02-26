@@ -324,6 +324,7 @@ Retry2:
     // write fp bitmap
     auto [bit_loc, bit_info] = get_fp_bit(tmp->fp, tmp->fp_2);
     uintptr_t fp_ptr = segptr + (4 + bit_loc) * sizeof(uint64_t);
+    // curseg_meta->fp_bitmap[bit_loc] = curseg_meta->fp_bitmap[bit_loc] | bit_info;
     while ((curseg_meta->fp_bitmap[bit_loc]&bit_info)==0 )
     {
         if(co_await conn->cas(fp_ptr, seg_rmr.rkey,
