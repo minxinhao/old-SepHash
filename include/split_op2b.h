@@ -22,6 +22,7 @@ constexpr uint64_t SEGMENT_SIZE = 1024;
 constexpr uint64_t SLOT_PER_SEG = ((SEGMENT_SIZE) / (sizeof(uint64_t)+sizeof(uint8_t)));
 constexpr uint64_t SLOT_BATCH_SIZE = 8;
 constexpr uint64_t RETRY_LIMIT = (SLOT_PER_SEG/SLOT_BATCH_SIZE); // TODO : 后期试试改成其他较小的值
+// constexpr uint64_t RETRY_LIMIT = 3; // TODO : 后期试试改成其他较小的值
 constexpr uint64_t MAX_MAIN_SIZE = 64 * SLOT_PER_SEG;
 constexpr uint64_t MAX_FP_INFO = 256;
 constexpr uint64_t INIT_DEPTH = 4;
@@ -152,6 +153,18 @@ struct Directory
     }
 } __attribute__((aligned(8)));
 
+struct SlotOffset
+{
+    // 记录每个CurSeg中上次insert访问到的slot offset
+    // uint8_t last_sign : 1; // 主要就是要增加这个last sign，记录上一次操作使用的sign，如果发生变化则从头开始寻找free slot
+    // uint8_t offset : 7; // 1<<7 = 128 ，足够113的SLOT_PERS_SEG使用
+    
+    // 上面的Last_sign在面对split时仍然不够(例如last_sign为1，然后split后的new_seg的sign仍为1)
+    uint8_t offset; 
+    uint64_t main_seg_ptr; //还是保留Ptr来判断
+} __attribute__((aligned(1)));
+
+
 class Client : public BasicDB
 {
   public:
@@ -202,7 +215,7 @@ class Client : public BasicDB
     uint64_t op_cnt;
 
     // Data part
-    uint8_t offset[DIR_SIZE] ; // 记录当前CurSeg中的freeslot开头？仅作参考，还是每个cli进行随机read
+    SlotOffset offset[DIR_SIZE] ; // 记录当前CurSeg中的freeslot开头？仅作参考，还是每个cli进行随机read
                         // 还是随机read吧，使用一个固定的序列？保存在本地，免得需要修改远端的。
     Directory *dir;
 };
