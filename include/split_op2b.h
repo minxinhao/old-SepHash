@@ -53,8 +53,9 @@ struct Slot
     {
         return fp < a.fp;
     }
-    void print()
+    void print(uint64_t slot_id = -1)
     {
+        if(slot_id!=-1) printf("slot_id:%lu\t", slot_id);
         printf("fp:%x\t", fp);
         printf("fp_2:%x\t", fp_2);
         printf("len:%d\t", len);
