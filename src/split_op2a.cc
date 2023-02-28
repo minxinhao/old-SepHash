@@ -222,7 +222,7 @@ Retry:
     Slot *curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * 2 * SLOT_BATCH_SIZE);
 Retry2:
     retry_cnt2++;
-    uintptr_t seg_offset = this->offset[segloc];
+    uintptr_t seg_offset = this->offset[segloc].offset;
     seg_offset = seg_offset % SLOT_PER_SEG;
     uintptr_t curseg_slots_ptr = segptr + sizeof(uint64_t) + sizeof(CurSegMeta) + seg_offset * sizeof(Slot);
     uint64_t slots_len = SLOT_PER_SEG - seg_offset;
@@ -234,6 +234,18 @@ Retry2:
     if (retry_cnt2 == 1)
     {
         co_await std::move(read_meta);
+        if(curseg_meta->main_seg_ptr != this->offset[segloc].main_seg_ptr){
+            this->offset[segloc].main_seg_ptr = curseg_meta->main_seg_ptr;
+            this->offset[segloc].offset = 0;
+            co_await std::move(read_slots);
+            if (curseg_meta->local_depth != dir->segs[segloc].local_depth || dir->global_depth < curseg_meta->local_depth)
+            {
+                if(retry_cnt1 == 109) log_err("[%lu:%lu:%lu]segloc:%lx local_depth:%lu remote local_depth:%lu", cli_id, coro_id, this->key_num, segloc, dir->segs[segloc].local_depth, curseg_meta->local_depth);
+                co_await sync_dir();
+            }
+            goto Retry;
+        }
+
         if (curseg_meta->local_depth != dir->segs[segloc].local_depth || dir->global_depth < curseg_meta->local_depth)
         {
             // log_err("[%lu:%lu:%lu]segloc:%lx local_depth:%lu remote local_depth:%lu", cli_id, coro_id, this->key_num, segloc, dir->segs[segloc].local_depth, curseg_meta->local_depth);
@@ -261,7 +273,7 @@ Retry2:
     {
         if (retry_cnt2 < (SLOT_PER_SEG/SLOT_BATCH_SIZE)) 
         {
-            this->offset[segloc] += slots_len;
+            this->offset[segloc].offset += slots_len;
             // log_err("[%lu:%lu:%lu]", cli_id, coro_id, this->key_num);
             goto Retry2;
         }
@@ -275,7 +287,7 @@ Retry2:
     }
     else if (slot_id == slots_len - 1)
     {
-        this->offset[segloc] += slots_len;
+        this->offset[segloc].offset += slots_len;
     }
     if(seg_offset+slot_id>=SLOT_PER_SEG){
         log_err("[%lu:%lu:%lu] wronge seg_offset:%lu at seg:%lx", cli_id, coro_id, this->key_num,seg_offset,segloc);
@@ -315,16 +327,16 @@ Retry2:
     // log_err("[%lu:%lu:%lu]", cli_id, coro_id, this->key_num);
     auto [bit_loc, bit_info] = get_fp_bit(tmp->fp, tmp->fp_2);
     uintptr_t fp_ptr = segptr + (4 + bit_loc) * sizeof(uint64_t);
-    // curseg_meta->fp_bitmap[bit_loc] = curseg_meta->fp_bitmap[bit_loc] | bit_info;
-    // wo_wait_conn->pure_write(fp_ptr, seg_rmr.rkey,
-    //                             &curseg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
-    while ((curseg_meta->fp_bitmap[bit_loc]&bit_info)==0 )
-    {
-        if(co_await conn->cas(fp_ptr, seg_rmr.rkey,
-                            curseg_meta->fp_bitmap[bit_loc], curseg_meta->fp_bitmap[bit_loc]| bit_info)){
-            break;
-        }
-    }
+    curseg_meta->fp_bitmap[bit_loc] = curseg_meta->fp_bitmap[bit_loc] | bit_info;
+    wo_wait_conn->pure_write(fp_ptr, seg_rmr.rkey,
+                                &curseg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
+    // while ((curseg_meta->fp_bitmap[bit_loc]&bit_info)==0 )
+    // {
+    //     if(co_await conn->cas(fp_ptr, seg_rmr.rkey,
+    //                         curseg_meta->fp_bitmap[bit_loc], curseg_meta->fp_bitmap[bit_loc]| bit_info)){
+    //         break;
+    //     }
+    // }
 
     // log_err("[%lu:%lu:%lu]segloc:%lu slot_id:%lu slot_ptr:%lx kvblock_ptr:%lx  offset:%lx kvblock_len:%lu", cli_id, coro_id, this->key_num, segloc, seg_offset+slot_id,slot_ptr,kvblock_ptr,ralloc.offset(kvblock_ptr),kvblock_len);
     
@@ -525,7 +537,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
             dir->segs[seg_loc].main_seg_ptr = cur_seg->main_seg_ptr;
             dir->segs[seg_loc].main_seg_len = cur_seg->main_seg_len;
             dir->segs[seg_loc].local_depth = local_depth + 1;
-            this->offset[seg_loc] = 0;
+            this->offset[seg_loc].offset = 0;
             memcpy(dir->segs[seg_loc].fp, fp_info1, sizeof(FpInfo) * MAX_FP_INFO);
             co_await conn->write(seg_rmr.raddr + sizeof(uint64_t) + seg_loc * sizeof(DirEntry), seg_rmr.rkey,
                                     &dir->segs[seg_loc], sizeof(DirEntry), lmr->lkey);
@@ -538,7 +550,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
             dir->segs[new_seg_loc].cur_seg_ptr = new_cur_ptr;
             dir->segs[new_seg_loc].main_seg_ptr = new_cur_seg->main_seg_ptr;
             dir->segs[new_seg_loc].main_seg_len = new_cur_seg->main_seg_len;
-            this->offset[new_seg_loc] = 0;
+            this->offset[new_seg_loc].offset = 0;
             memcpy(dir->segs[new_seg_loc].fp, fp_info2, sizeof(FpInfo) * MAX_FP_INFO);
             co_await conn->write(seg_rmr.raddr + sizeof(uint64_t) + dir_size * sizeof(DirEntry), seg_rmr.rkey,
                                     dir->segs + dir_size, dir_size * sizeof(DirEntry), lmr->lkey);
@@ -573,7 +585,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
                     memcpy(dir->segs[cur_seg_loc].fp, fp_info1, sizeof(FpInfo) * MAX_FP_INFO);
                     // log_err("[%lu:%lu:%lu]Local SPlit At segloc:%lx depth:%lu to :%lu with new main_seg_ptr:%lx", cli_id, coro_id, this->key_num, cur_seg_loc, local_depth, local_depth + 1, cur_seg->main_seg_ptr);
                 }
-                this->offset[cur_seg_loc] = 0;
+                this->offset[cur_seg_loc].offset = 0;
                 dir->segs[cur_seg_loc].local_depth = local_depth + 1;
                 co_await conn->write(seg_rmr.raddr + sizeof(uint64_t) + cur_seg_loc * sizeof(DirEntry), seg_rmr.rkey,
                                         dir->segs + cur_seg_loc, sizeof(DirEntry), lmr->lkey);
@@ -595,7 +607,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
         cur_seg->main_seg_ptr = new_main_ptr;
         cur_seg->main_seg_len = main_seg_size / sizeof(Slot) + SLOT_PER_SEG;
         cur_seg->sign = !cur_seg->sign;
-        this->offset[seg_loc] = 0;
+        this->offset[seg_loc].offset = 0;
         memset(cur_seg->fp_bitmap, 0, sizeof(uint64_t) * 16);
         co_await conn->write(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, ((uint64_t *)cur_seg) + 1, (3 + 16) * sizeof(uint64_t),
                                 lmr->lkey);
@@ -609,7 +621,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
             cur_seg_loc = (i << local_depth) | first_seg_loc;
             dir->segs[cur_seg_loc].main_seg_ptr = new_main_ptr;
             dir->segs[cur_seg_loc].main_seg_len = cur_seg->main_seg_len;
-            this->offset[cur_seg_loc] = 0;
+            this->offset[cur_seg_loc].offset = 0;
             memcpy(dir->segs[cur_seg_loc].fp, fp_info, sizeof(FpInfo) * MAX_FP_INFO);
             co_await conn->write(
                 seg_rmr.raddr + sizeof(uint64_t) + cur_seg_loc * sizeof(DirEntry) + 2 * sizeof(uint64_t), seg_rmr.rkey,
@@ -621,7 +633,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
             cur_seg_loc = (i << local_depth) | first_seg_loc;
             dir->segs[cur_seg_loc + dir_size].main_seg_ptr = new_main_ptr;
             dir->segs[cur_seg_loc + dir_size].main_seg_len = cur_seg->main_seg_len;
-            this->offset[cur_seg_loc + dir_size] = 0;
+            this->offset[cur_seg_loc + dir_size].offset = 0;
             memcpy(dir->segs[cur_seg_loc + dir_size].fp, fp_info, sizeof(FpInfo) * MAX_FP_INFO);
             co_await conn->write(seg_rmr.raddr + sizeof(uint64_t) + (cur_seg_loc + dir_size) * sizeof(DirEntry) +
                                         2 * sizeof(uint64_t),
@@ -715,7 +727,7 @@ Retry:
     if (cur_segmeta->fp_bitmap[bit_loc] & bit_info == 1)
     {
         curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_PER_SEG);
-        auto read_curseg = conn->read(cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta), seg_rmr.rkey, curseg_slots, sizeof(Slot) * SLOT_PER_SEG, lmr->lkey);
+        auto read_curseg = wo_wait_conn->read(cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta), seg_rmr.rkey, curseg_slots, sizeof(Slot) * SLOT_PER_SEG, lmr->lkey);
         read_seg_slots.conn = read_curseg.conn;
         read_seg_slots.cor = read_curseg.cor;
     }

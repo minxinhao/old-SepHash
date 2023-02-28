@@ -151,6 +151,13 @@ struct Directory
     }
 } __attribute__((aligned(8)));
 
+struct SlotOffset
+{
+    // 记录每个CurSeg中上次insert访问到的slot offset
+    uint8_t offset; 
+    uint64_t main_seg_ptr; //记录上一次操作使用的main_Ptr,如果发生变化则从头开始寻找free slot
+} __attribute__((aligned(1)));
+
 class Client : public BasicDB
 {
   public:
@@ -201,7 +208,7 @@ class Client : public BasicDB
     uint64_t op_cnt;
 
     // Data part
-    uint8_t offset[DIR_SIZE] ; // 记录当前CurSeg中的freeslot开头？仅作参考，还是每个cli进行随机read
+    SlotOffset offset[DIR_SIZE] ; // 记录当前CurSeg中的freeslot开头？仅作参考，还是每个cli进行随机read
                         // 还是随机read吧，使用一个固定的序列？保存在本地，免得需要修改远端的。
     Directory *dir;
 };
