@@ -5,10 +5,9 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "./include",
-                "/opt/intel/oneapi/mkl/latest/include"
             ],
             "defines": [],
-            "compilerPath": "/usr/bin/clang",
+            "compilerPath": "/usr/bin/g++-11",
             "cStandard": "c17",
             "cppStandard": "c++20",
             "intelliSenseMode": "linux-clang-x64"

@@ -817,7 +817,8 @@ int rdma_conn::modify_qp_to_rtr(uint32_t rqp_num, uint16_t rlid, const ibv_gid *
     int rc;
     memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_RTR;
-    attr.path_mtu = IBV_MTU_512;
+    // attr.path_mtu = IBV_MTU_512;
+    attr.path_mtu = IBV_MTU_1024;
     attr.dest_qp_num = rqp_num;
     attr.rq_psn = 0;
     attr.max_dest_rd_atomic = rdma_max_rd_atomic;
