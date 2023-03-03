@@ -10,15 +10,16 @@
 #include "split_op2.h"
 #include "split_op2a.h"
 #include "split_op2b.h"
+#include "split_op2c.h"
 #include "rdma_bench.h"
 #include <set>
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = RACE::Client;
-using ServerType = RACE::Server;
-using Slice = RACE::Slice;
+using ClientType = SPLIT_OP2C::Client;
+using ServerType = SPLIT_OP2C::Server;
+using Slice = SPLIT_OP2C::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -95,12 +96,12 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
                 (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
                 gen->operator()(key_chooser()));
             co_await cli->search(&key, &ret_value);
-            // if (ret_value.len != value.len || memcmp(ret_value.data, value.data, value.len) != 0)
-            // {
-            //     log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s", cli_id, coro_id, tmp_key,
-            //             ret_value.data, value.data);
-            //     // exit(-1);
-            // }
+            if (ret_value.len != value.len || memcmp(ret_value.data, value.data, value.len) != 0)
+            {
+                log_err("[%lu:%lu]wrong value for key:%lu with value:%s expected:%s", cli_id, coro_id, tmp_key,
+                        ret_value.data, value.data);
+                // exit(-1);
+            }
         }
         else if (op_frac < update_frac)
         {

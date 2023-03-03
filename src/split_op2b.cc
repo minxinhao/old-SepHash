@@ -840,7 +840,6 @@ Retry:
                 }
             }
         }
-
     }
 
     if (res != nullptr && res->v_len != 0)
