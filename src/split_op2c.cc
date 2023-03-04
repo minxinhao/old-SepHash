@@ -31,6 +31,12 @@ inline __attribute__((always_inline)) std::tuple<uint64_t, uint64_t> get_fp_bit(
     return std::make_tuple(bit_loc, bit_info);
 }
 
+void print_bit_map(uint64_t* fp_bitmap){
+    for(int i = 0 ; i < 16 ; i++){
+        log_err("%16lx",fp_bitmap[i]);
+    }
+}
+
 Server::Server(Config &config) : dev(nullptr, 1, config.roce_flag), ser(dev)
 {
     seg_mr = dev.reg_mr(233, config.mem_size);
@@ -223,7 +229,7 @@ Retry:
     auto read_meta = conn->read(segptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, sizeof(CurSegMeta), lmr->lkey);
     // b. read slots
     Slot *seg_slots = (Slot *)alloc.alloc(sizeof(Slot) * 2 * SLOT_BATCH_SIZE);
-    uintptr_t seg_offset = this->offset[segloc].offset % SLOT_PER_SEG;
+    uint64_t seg_offset = this->offset[segloc].offset % SLOT_PER_SEG;
     uintptr_t seg_slots_ptr = segptr + sizeof(uint64_t) + sizeof(CurSegMeta) + seg_offset * sizeof(Slot);
     uint64_t slots_len = SLOT_PER_SEG - seg_offset;
     slots_len = (slots_len < (2 * SLOT_BATCH_SIZE)) ? slots_len : SLOT_BATCH_SIZE;
@@ -232,16 +238,21 @@ Retry:
 
     // c. 直接通过main_seg_ptr来判断一致性
     co_await std::move(read_meta);
-    // log_err("[%lu:%lu:%lu]segloc:%lx global_depth:%lx local_depth:%lx seg_offset:%lu seg_ptr:%lx main_ptr:%lx seg_meta:main_ptr:%lx sign:%d ",cli_id,coro_id,this->key_num,segloc,dir->global_depth,seg_meta->local_depth,seg_offset,segptr,dir->segs[segloc].main_seg_ptr,seg_meta->main_seg_ptr,seg_meta->sign);
-    uint8_t remote_main_ptr = seg_meta->main_seg_ptr;
-    if (remote_main_ptr != this->offset[segloc].main_seg_ptr)
+    if(seg_meta->local_depth > dir->global_depth){
+        // 远端segloc上发生了Global SPlit
+        log_err("[%lu:%lu:%lu]remote local_depth:%lu at segloc:%lx exceed local global depth%lu",cli_id,coro_id,this->key_num,seg_meta->local_depth,segloc,dir->global_depth);
+        dir->global_depth = seg_meta->local_depth;
+        co_await check_gd(segloc);
+        goto Retry;
+    }
+    if (seg_meta->main_seg_ptr != this->offset[segloc].main_seg_ptr)
     {
         // 检查一遍Global Depth是否一致
         // TODO:增加segloc参数，读取对应位置的cur_seg_ptr；否则split的信息无法被及时同步
         uintptr_t new_cur_ptr = co_await check_gd(segloc);
         uint64_t new_seg_loc = get_seg_loc(pattern, dir->global_depth);
         if(new_cur_ptr != segptr || segloc != new_seg_loc){
-            log_err("[%lu:%lu:%lu]stale cur_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,segptr,new_cur_ptr);
+            // log_err("[%lu:%lu:%lu]stale cur_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,segptr,new_cur_ptr);
             this->offset[segloc].offset = 0;
             this->offset[segloc].main_seg_ptr = dir->segs[segloc].main_seg_ptr;
             co_await std::move(read_slots);
@@ -265,7 +276,6 @@ Retry:
         // 怎么同步信息；同步哪些信息
         goto Retry;
     }
-
 
 
     // 3. find free slot
@@ -332,6 +342,7 @@ Retry:
         co_await Split(segloc, segptr, seg_meta);
         co_return;
     }
+
     // TODO:可以搬到前面隐藏起来
     // 7. write fp bitmap
     auto [bit_loc, bit_info] = get_fp_bit(tmp->fp, tmp->fp_2);
@@ -339,9 +350,16 @@ Retry:
     seg_meta->fp_bitmap[bit_loc] = seg_meta->fp_bitmap[bit_loc] | bit_info;
     wo_wait_conn->pure_write(fp_ptr, seg_rmr.rkey,
                                 &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
+    // while ((seg_meta->fp_bitmap[bit_loc]&bit_info)==0 )
+    // {
+    //     if(co_await conn->cas(fp_ptr, seg_rmr.rkey,
+    //                         seg_meta->fp_bitmap[bit_loc], seg_meta->fp_bitmap[bit_loc]| bit_info)){
+    //         break;
+    //     }
+    // }
 }
 
-void merge_insert(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_seg_len, Slot *new_seg)
+void Client::merge_insert(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_seg_len, Slot *new_seg)
 {
     std::sort(data, data + len);
     uint8_t sign = data[0].sign;
@@ -350,7 +368,7 @@ void merge_insert(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_seg_len,
     {
         if (data[off_1].sign != sign)
         {
-            log_err("wrong sign");
+            log_err("[%lu:%lu:%lu]wrong sign",cli_id,coro_id,this->key_num);
             print_mainseg(data, len);
             exit(-1);
         }
@@ -479,27 +497,11 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
         cal_fpinfo(new_seg_1->slots, off1, fp_info1);
         cal_fpinfo(new_seg_2->slots, off2, fp_info2);
 
-        // 4.2 Write New MainSeg to Remote
-        // a. New CurSeg && New MainSeg
+        // 4.2 Update new-main-ptr for DirEntries
         uintptr_t new_cur_ptr = ralloc.alloc(sizeof(CurSeg), true);
-        CurSeg *new_cur_seg = (CurSeg *)alloc.alloc(sizeof(CurSeg));
-        memset(new_cur_seg, 0, sizeof(CurSeg));
-        new_cur_seg->seg_meta.local_depth = local_depth + 1;
-        new_cur_seg->seg_meta.sign = 1;
-        new_cur_seg->seg_meta.main_seg_ptr = ralloc.alloc(sizeof(Slot) * off2);
-        new_cur_seg->seg_meta.main_seg_len = off2;
-        wo_wait_conn->pure_write(new_cur_seg->seg_meta.main_seg_ptr, seg_rmr.rkey, new_seg_2, sizeof(Slot) * off2, lmr->lkey);
-        co_await conn->write(new_cur_ptr, seg_rmr.rkey, new_cur_seg, sizeof(CurSeg), lmr->lkey);
-        // b. new main_seg for old
-        cur_seg->seg_meta.main_seg_ptr = ralloc.alloc(sizeof(Slot) * off1);
-        cur_seg->seg_meta.main_seg_len = off1;
-        cur_seg->seg_meta.local_depth = local_depth + 1;
-        // cur_seg->seg_meta.sign = !cur_seg->seg_meta.sign; // 对old cur_seg的清空放到最后?保证同步。
-        memset(cur_seg->seg_meta.fp_bitmap, 0, sizeof(uint64_t) * 16);
-        wo_wait_conn->pure_write(cur_seg->seg_meta.main_seg_ptr, seg_rmr.rkey, new_seg_1, sizeof(Slot) * off1, lmr->lkey);
-        co_await conn->write(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, ((uint64_t *)cur_seg) + 1, sizeof(CurSegMeta),lmr->lkey);
+        uintptr_t new_main_ptr1 = ralloc.alloc(sizeof(Slot) * off1);
+        uintptr_t new_main_ptr2 = ralloc.alloc(sizeof(Slot) * off2);
 
-        // 4.3 Update new-main-ptr for DirEntries
         // a. 同步远端global depth, 确认split类型
         co_await check_gd();
 
@@ -523,20 +525,20 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
                 if (i & 1){
                     // Local SegOffset
                     this->offset[cur_seg_loc+offset].offset = 0;
-                    this->offset[cur_seg_loc+offset].main_seg_ptr = new_cur_seg->seg_meta.main_seg_ptr;
+                    this->offset[cur_seg_loc+offset].main_seg_ptr = new_main_ptr2;
                     // DirEntry
                     dir->segs[cur_seg_loc+offset].cur_seg_ptr = new_cur_ptr;
-                    dir->segs[cur_seg_loc+offset].main_seg_ptr = new_cur_seg->seg_meta.main_seg_ptr;
-                    dir->segs[cur_seg_loc+offset].main_seg_len = new_cur_seg->seg_meta.main_seg_len;
+                    dir->segs[cur_seg_loc+offset].main_seg_ptr = new_main_ptr2;
+                    dir->segs[cur_seg_loc+offset].main_seg_len = off2;
                     memcpy(dir->segs[cur_seg_loc+offset].fp, fp_info2, sizeof(FpInfo) * MAX_FP_INFO);
                 }else{
                     // Local SegOffset
                     this->offset[cur_seg_loc+offset].offset = 0;
-                    this->offset[cur_seg_loc+offset].main_seg_ptr = cur_seg->seg_meta.main_seg_ptr;
+                    this->offset[cur_seg_loc+offset].main_seg_ptr = new_main_ptr1;
                     // DirEntry
                     dir->segs[cur_seg_loc+offset].cur_seg_ptr = seg_ptr;
-                    dir->segs[cur_seg_loc+offset].main_seg_ptr = cur_seg->seg_meta.main_seg_ptr;
-                    dir->segs[cur_seg_loc+offset].main_seg_len = cur_seg->seg_meta.main_seg_len;
+                    dir->segs[cur_seg_loc+offset].main_seg_ptr = new_main_ptr1;
+                    dir->segs[cur_seg_loc+offset].main_seg_len = off1;
                     memcpy(dir->segs[cur_seg_loc+offset].fp, fp_info1, sizeof(FpInfo) * MAX_FP_INFO);
                 }
                 dir->segs[cur_seg_loc].local_depth = local_depth + 1;
@@ -547,10 +549,10 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
 
                 if (local_depth == dir->global_depth){
                     // global
-                    log_err("[%lu:%lu:%lu]Global SPlit At segloc:%lx depth:%lu to :%lu with new_main_seg_ptr:%lx", cli_id, coro_id, this->key_num, cur_seg_loc+offset, local_depth, local_depth + 1, i & 1 ?new_cur_seg->seg_meta.main_seg_ptr:cur_seg->seg_meta.main_seg_ptr);
+                    log_err("[%lu:%lu:%lu]Global SPlit At segloc:%lx depth:%lu to :%lu with new seg_ptr:%lx new_main_seg_ptr:%lx", cli_id, coro_id, this->key_num, cur_seg_loc+offset, local_depth, local_depth + 1, i & 1 ? new_cur_ptr:seg_ptr,i & 1 ?new_main_ptr2:new_main_ptr1);
                 }else{
                     // local 
-                    // log_err("[%lu:%lu:%lu]Local SPlit At segloc:%lx depth:%lu to :%lu with new main_seg_ptr:%lx", cli_id, coro_id, this->key_num, cur_seg_loc+offset, local_depth, local_depth + 1, i & 1 ?new_cur_seg->seg_meta.main_seg_ptr:cur_seg->seg_meta.main_seg_ptr);
+                    // log_err("[%lu:%lu:%lu]Local SPlit At segloc:%lx depth:%lu to :%lu with new seg_ptr:%lx new main_seg_ptr:%lx", cli_id, coro_id, this->key_num, cur_seg_loc+offset, local_depth, local_depth + 1, i & 1 ? new_cur_ptr:seg_ptr, i & 1 ? new_main_ptr2:new_main_ptr1);
                 }
             }
         }
@@ -560,6 +562,25 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
             co_await conn->write(seg_rmr.raddr, seg_rmr.rkey, &dir->global_depth, sizeof(uint64_t), lmr->lkey);
         }
         
+        // 4.3 Write New MainSeg to Remote
+        // a. New CurSeg && New MainSeg
+        CurSeg *new_cur_seg = (CurSeg *)alloc.alloc(sizeof(CurSeg));
+        memset(new_cur_seg, 0, sizeof(CurSeg));
+        new_cur_seg->seg_meta.local_depth = local_depth + 1;
+        new_cur_seg->seg_meta.sign = 1;
+        new_cur_seg->seg_meta.main_seg_ptr = new_main_ptr2;
+        new_cur_seg->seg_meta.main_seg_len = off2;
+        wo_wait_conn->pure_write(new_cur_seg->seg_meta.main_seg_ptr, seg_rmr.rkey, new_seg_2, sizeof(Slot) * off2, lmr->lkey);
+        co_await conn->write(new_cur_ptr, seg_rmr.rkey, new_cur_seg, sizeof(CurSeg), lmr->lkey);
+        // b. new main_seg for old
+        cur_seg->seg_meta.main_seg_ptr = new_main_ptr1;
+        cur_seg->seg_meta.main_seg_len = off1;
+        cur_seg->seg_meta.local_depth = local_depth + 1;
+        // cur_seg->seg_meta.sign = !cur_seg->seg_meta.sign; // 对old cur_seg的清空放到最后?保证同步。
+        memset(cur_seg->seg_meta.fp_bitmap, 0, sizeof(uint64_t) * 16);
+        wo_wait_conn->pure_write(cur_seg->seg_meta.main_seg_ptr, seg_rmr.rkey, new_seg_1, sizeof(Slot) * off1, lmr->lkey);
+        co_await conn->write(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, ((uint64_t *)cur_seg) + 1, sizeof(CurSegMeta),lmr->lkey);
+
 
         // 4.4 Change Sign (Equal to unlock this segment)
         cur_seg->seg_meta.sign = !cur_seg->seg_meta.sign;
@@ -636,6 +657,7 @@ task<bool> Client::search(Slice *key, Slice *value)
     uint64_t pattern = (uint64_t)hash(key->data, key->len);
     uint64_t pattern_fp1 = fp(pattern);
     uint64_t pattern_fp2 = fp2(pattern);
+    this->key_num = *(uint64_t *)key->data;
 Retry:
     alloc.ReSet(sizeof(Directory));
     uint64_t segloc = get_seg_loc(pattern, dir->global_depth);
@@ -656,7 +678,7 @@ Retry:
     }
     end_pos = start_pos + dir->segs[segloc].fp[pattern_fp1].num;
     uint64_t main_size = (end_pos - start_pos) * sizeof(Slot);
-    
+
     // 3. Read SegMeta && MainSlots
     CurSegMeta *seg_meta = (CurSegMeta *)alloc.alloc(sizeof(CurSegMeta));
     auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, sizeof(CurSegMeta), lmr->lkey);
@@ -665,8 +687,7 @@ Retry:
 
     // 4. Check Depth && MainSegPtr
     co_await std::move(read_meta);
-    uint8_t remote_main_ptr = seg_meta->main_seg_ptr;
-    if (remote_main_ptr != this->offset[segloc].main_seg_ptr){
+    if (seg_meta->main_seg_ptr != this->offset[segloc].main_seg_ptr){
         // 检查一遍Global Depth是否一致
         // TODO:增加segloc参数，读取对应位置的cur_seg_ptr；否则split的信息无法被及时同步
         uintptr_t new_cur_ptr = co_await check_gd(segloc);
@@ -705,18 +726,6 @@ Retry:
     uint64_t dep = dir->segs[segloc].local_depth - (dir->segs[segloc].local_depth % 4); // 按4对齐
     uint8_t dep_info = (pattern >> dep) & 0xf;
 
-    // 5.1 判断Key是否出现在CurSeg中
-    auto [bit_loc, bit_info] = get_fp_bit(pattern_fp1,pattern_fp2);
-    rdma_future read_cur_seg;
-    Slot *curseg_slots;
-    if (seg_meta->fp_bitmap[bit_loc] & bit_info == 1)
-    {
-        curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_PER_SEG);
-        auto read_curseg = conn->read(cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta), seg_rmr.rkey, curseg_slots, sizeof(Slot) * SLOT_PER_SEG, lmr->lkey);
-        read_cur_seg.conn = read_curseg.conn;
-        read_cur_seg.cor = read_curseg.cor;
-    }
-
     // 5.1 Find In Main
     co_await std::move(read_main_seg);
     for(uint64_t cnt = 0 ; cnt < 2 ; cnt++){
@@ -744,12 +753,16 @@ Retry:
     }
 
     // 5.2 Find In CurSeg
-    if (seg_meta->fp_bitmap[bit_loc] & bit_info == 1)
+    // a. 判断Key是否出现在CurSeg中
+    auto [bit_loc, bit_info] = get_fp_bit(pattern_fp1,pattern_fp2);
+    if ((seg_meta->fp_bitmap[bit_loc] & bit_info) != 0 || res==nullptr)
     {
-        co_await std::move(read_cur_seg);
+        Slot* curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_PER_SEG);
+        co_await conn->read(cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta), seg_rmr.rkey, curseg_slots, sizeof(Slot) * SLOT_PER_SEG, lmr->lkey);
+
         for (uint64_t i = 0; i < SLOT_PER_SEG; i++)
         {
-            // cur_seg->slots[i].print();
+            // curseg_slots[i].print();
             if (curseg_slots[i] != 0 && curseg_slots[i].fp == pattern_fp1 && curseg_slots[i].dep == dep_info && curseg_slots[i].fp_2 == pattern_fp2)
             {
                 co_await conn->read(ralloc.ptr(curseg_slots[i].offset), seg_rmr.rkey, kv_block, (curseg_slots[i].len) * ALIGNED_SIZE, lmr->lkey);
@@ -776,6 +789,9 @@ Retry:
     log_err("[%lu:%lu:%lu] No match key at segloc:%lx with local_depth:%lu and global_depth:%lu seg_ptr:%lx main_seg_ptr:%lx",
             cli_id, coro_id, key_num, segloc, dir->segs[segloc].local_depth, dir->global_depth, cur_seg_ptr,
             dir->segs[segloc].main_seg_ptr);
+    log_err("[%lu:%lu:%lu] segloc:%lx bit_loc:%lu bit_info:%16lx fp_bitmap[%lu]&bit_info = %lu",cli_id,coro_id,this->key_num,segloc,bit_loc,bit_info,bit_loc,seg_meta->fp_bitmap[bit_loc]&bit_info);
+    print_bit_map(seg_meta->fp_bitmap);
+    exit(-1);
     co_return false;
 }
 

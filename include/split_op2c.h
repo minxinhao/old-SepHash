@@ -152,7 +152,7 @@ struct SlotOffset
 {
     // 记录每个CurSeg中上次insert访问到的slot offset
     uint8_t offset; 
-    uint8_t main_seg_ptr; //还是保留Ptr的低8位来判断
+    uint64_t main_seg_ptr; 
 } __attribute__((aligned(1)));
 
 
@@ -181,7 +181,8 @@ class Client : public BasicDB
     task<uintptr_t> check_gd(uint64_t segloc);
 
     task<> Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_meta);
-
+    void merge_insert(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_seg_len, Slot *new_seg);
+    
     // Global/Local并行的方式造成的等待冲突太高了，就使用简单的单个lock
     task<int> LockDir();
     task<> UnlockDir();
