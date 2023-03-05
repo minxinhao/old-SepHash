@@ -222,6 +222,11 @@ Retry:
     Slot *tmp = (Slot *)alloc.alloc(sizeof(Slot));
     uint64_t segloc = get_seg_loc(pattern, dir->global_depth);
     uintptr_t segptr = dir->segs[segloc].cur_seg_ptr;
+    if(segptr == 0){
+        segptr = co_await check_gd(segloc);
+        uint64_t new_seg_loc = get_seg_loc(pattern, dir->global_depth);
+        if(new_seg_loc != segloc) goto Retry;
+    }
 
     // 2. read segment_meta && segment_slot concurrently
     // a. read meta
@@ -240,9 +245,10 @@ Retry:
     co_await std::move(read_meta);
     if(seg_meta->local_depth > dir->global_depth){
         // 远端segloc上发生了Global SPlit
-        log_err("[%lu:%lu:%lu]remote local_depth:%lu at segloc:%lx exceed local global depth%lu",cli_id,coro_id,this->key_num,seg_meta->local_depth,segloc,dir->global_depth);
-        dir->global_depth = seg_meta->local_depth;
-        co_await check_gd(segloc);
+        log_err("[%lu:%lu:%lu]remote local_depth:%lu at segloc:%lx exceed local global depth%lu segptr:%lx",cli_id,coro_id,this->key_num,seg_meta->local_depth,segloc,dir->global_depth,segptr);
+        if(seg_meta->local_depth <= MAX_DEPTH) dir->global_depth = seg_meta->local_depth;
+        uint64_t new_seg_loc = get_seg_loc(pattern, dir->global_depth);
+        co_await check_gd(new_seg_loc);
         goto Retry;
     }
     if (seg_meta->main_seg_ptr != this->offset[segloc].main_seg_ptr)
@@ -627,13 +633,13 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
             // 暂时还是co_await吧
             co_await conn->write(dentry_ptr, seg_rmr.rkey,&dir->segs[cur_seg_loc+offset], sizeof(DirEntry) , lmr->lkey);
             // conn->pure_write(dentry_ptr, seg_rmr.rkey,&dir->segs[cur_seg_loc+offset], sizeof(DirEntry), lmr->lkey);
+            // log_err("[%lu:%lu:%lu]Merge At segloc:%lx depth:%lu with old_main_ptr:%lx new_main_ptr:%lx",cli_id,coro_id,this->key_num,cur_seg_loc+offset,local_depth,main_seg_ptr,new_main_ptr);
         }
     }
     
     // 5.3 Change Sign (Equal to unlock this segment)
     cur_seg->seg_meta.sign = !cur_seg->seg_meta.sign;
     co_await wo_wait_conn->write(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, ((uint64_t *)cur_seg) + 1, sizeof(uint64_t),lmr->lkey);
-    // log_err("[%lu:%lu:%lu]Merge At segloc:%lx depth:%lu with new_main_ptr:%lx",cli_id,coro_id,this->key_num,seg_loc,local_depth,new_main_ptr);
 }
 
 task<int> Client::LockDir()
