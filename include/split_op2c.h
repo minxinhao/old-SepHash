@@ -151,6 +151,7 @@ struct Directory
 struct SlotOffset
 {
     // 记录每个CurSeg中上次insert访问到的slot offset
+    bool sign;
     uint8_t offset; 
     uint64_t main_seg_ptr; 
 } __attribute__((aligned(1)));

@@ -115,7 +115,8 @@ Client::Client(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn
     // sync dir
     dir = (Directory *)alloc.alloc(sizeof(Directory));
     memset(dir, 0, sizeof(Directory));
-    memset(offset, 0, sizeof(uint8_t) * DIR_SIZE);
+    memset(offset, 0, sizeof(SlotOffset) * DIR_SIZE);
+    for(uint64_t i = 0 ; i < (1<<INIT_DEPTH) ; i++) this->offset[i].sign = 1;
     cli->run(sync_dir());
 }
 
@@ -251,7 +252,7 @@ Retry:
         co_await check_gd(new_seg_loc);
         goto Retry;
     }
-    if (seg_meta->main_seg_ptr != this->offset[segloc].main_seg_ptr)
+    if (seg_meta->main_seg_ptr != this->offset[segloc].main_seg_ptr || seg_meta->sign != this->offset[segloc].sign)
     {
         // 检查一遍Global Depth是否一致
         // TODO:增加segloc参数，读取对应位置的cur_seg_ptr；否则split的信息无法被及时同步
@@ -259,6 +260,7 @@ Retry:
         uint64_t new_seg_loc = get_seg_loc(pattern, dir->global_depth);
         if(new_cur_ptr != segptr || segloc != new_seg_loc){
             // log_err("[%lu:%lu:%lu]stale cur_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,segptr,new_cur_ptr);
+            // log_err("[%lu:%lu:%lu] segloc:%lx edit segoffset:%lu to %lu",cli_id,coro_id,this->key_num,segloc,seg_offset,0lu);
             this->offset[segloc].offset = 0;
             this->offset[segloc].main_seg_ptr = dir->segs[segloc].main_seg_ptr;
             co_await std::move(read_slots);
@@ -271,12 +273,14 @@ Retry:
         uint64_t first_seg_loc = segloc & ((1ull << new_local_depth) - 1);
         for (uint64_t i = 0; i < stride; i++)
         {
+            // log_err("[%lu:%lu:%lu] segloc:%lx edit segoffset:%lu to %lu",cli_id,coro_id,this->key_num,cur_seg_loc,seg_offset,0lu);
             cur_seg_loc = (i << new_local_depth) | first_seg_loc;
+            dir->segs[segloc].local_depth = seg_meta->local_depth;
             dir->segs[cur_seg_loc].main_seg_ptr = seg_meta->main_seg_ptr;
             dir->segs[cur_seg_loc].main_seg_len = seg_meta->main_seg_len;
+            this->offset[cur_seg_loc].sign = seg_meta->sign;
             this->offset[cur_seg_loc].offset = 0;
             this->offset[cur_seg_loc].main_seg_ptr = seg_meta->main_seg_ptr;
-            dir->segs[segloc].local_depth = seg_meta->local_depth;
         }
         co_await std::move(read_slots);
         // 怎么同步信息；同步哪些信息
@@ -299,12 +303,14 @@ Retry:
     }
     if (slot_id == -1)
     {
+        // log_err("[%lu:%lu:%lu] segloc:%lx edit segoffset:%lu to %lu",cli_id,coro_id,this->key_num,segloc,seg_offset,(seg_offset+slots_len)%SLOT_PER_SEG);
         this->offset[segloc].offset += slots_len;
         this->offset[segloc].offset = this->offset[segloc].offset%SLOT_PER_SEG;
         goto Retry;
     }
     else if (slot_id == slots_len - 1)
     {
+        // log_err("[%lu:%lu:%lu] segloc:%lx edit segoffset:%lu to %lu",cli_id,coro_id,this->key_num,segloc,seg_offset,(seg_offset+slots_len)%SLOT_PER_SEG);
         this->offset[segloc].offset += slots_len;
         this->offset[segloc].offset = this->offset[segloc].offset%SLOT_PER_SEG;
     }
@@ -331,7 +337,7 @@ Retry:
         co_await std::move(fetch_ver);
         goto Retry;
     }
-
+    // log_err("[%lu:%lu:%lu] segloc:%lx write at segoffset:%lu slot_id:%lu with: main_seg_ptr:%lx seg_meta:sign:%d",cli_id,coro_id,this->key_num,segloc,seg_offset,slot_id,this->offset[segloc].main_seg_ptr,seg_meta->sign);
     // 5. write kv
     co_await std::move(fetch_ver);
     kv_block->version = *version;
