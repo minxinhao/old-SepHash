@@ -669,6 +669,7 @@ task<bool> Client::search(Slice *key, Slice *value)
     uint64_t pattern = (uint64_t)hash(key->data, key->len);
     uint64_t pattern_fp1 = fp(pattern);
     uint64_t pattern_fp2 = fp2(pattern);
+    auto [bit_loc, bit_info] = get_fp_bit(pattern_fp1,pattern_fp2);
     this->key_num = *(uint64_t *)key->data;
 Retry:
     alloc.ReSet(sizeof(Directory));
@@ -693,7 +694,8 @@ Retry:
 
     // 3. Read SegMeta && MainSlots
     CurSegMeta *seg_meta = (CurSegMeta *)alloc.alloc(sizeof(CurSegMeta));
-    auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, sizeof(CurSegMeta), lmr->lkey);
+    auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 4 * sizeof(uint64_t), lmr->lkey);
+    auto read_bit_map = conn->read(cur_seg_ptr + 5 * sizeof(uint64_t) + bit_loc * sizeof(uint64_t), seg_rmr.rkey, &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
     Slot *main_seg = (Slot *)alloc.alloc(main_size);
     auto read_main_seg = wo_wait_conn->read(main_seg_ptr + start_pos * sizeof(Slot), seg_rmr.rkey, main_seg, main_size, lmr->lkey);
 
@@ -708,6 +710,7 @@ Retry:
             log_err("[%lu:%lu:%lu]stale cur_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,cur_seg_ptr,new_cur_ptr);
             this->offset[segloc].offset = 0;
             this->offset[segloc].main_seg_ptr = dir->segs[segloc].main_seg_ptr;
+            co_await std::move(read_bit_map);
             co_await std::move(read_main_seg);
             goto Retry;
         } 
@@ -725,13 +728,14 @@ Retry:
             this->offset[cur_seg_loc].main_seg_ptr = seg_meta->main_seg_ptr;
             dir->segs[segloc].local_depth = seg_meta->local_depth;
         }
+        co_await std::move(read_bit_map);
         co_await std::move(read_main_seg);
         // 怎么同步信息；同步哪些信息
         goto Retry;
     }
 
     // 5. Find Slot && Read KV
-     uint64_t version = UINT64_MAX;
+    uint64_t version = UINT64_MAX;
     uint64_t res_slot = UINT64_MAX;
     KVBlock *res = nullptr;
     KVBlock *kv_block = (KVBlock *)alloc.alloc(7 * ALIGNED_SIZE);
@@ -766,7 +770,7 @@ Retry:
 
     // 5.2 Find In CurSeg
     // a. 判断Key是否出现在CurSeg中
-    auto [bit_loc, bit_info] = get_fp_bit(pattern_fp1,pattern_fp2);
+    co_await std::move(read_bit_map);
     if ((seg_meta->fp_bitmap[bit_loc] & bit_info) != 0 || res==nullptr)
     {
         Slot* curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_PER_SEG);
