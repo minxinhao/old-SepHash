@@ -752,7 +752,7 @@ Retry:
             if (main_seg[i] != 0 && main_seg[i].fp == pattern_fp1 && main_seg[i].dep == dep_info)
             {
                 if(main_seg[i].fp_2 == pattern_fp2 || cnt == 1){
-                    co_await conn->read(ralloc.ptr(main_seg[i].offset), seg_rmr.rkey, kv_block,(main_seg[i].len) * ALIGNED_SIZE, lmr->lkey);
+                    co_await wo_wait_conn->read(ralloc.ptr(main_seg[i].offset), seg_rmr.rkey, kv_block,(main_seg[i].len) * ALIGNED_SIZE, lmr->lkey);
                     if (memcmp(key->data, kv_block->data, key->len) == 0)
                     {
                         if (kv_block->version > version || version == UINT64_MAX)
