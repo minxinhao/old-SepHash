@@ -122,7 +122,7 @@ Client::Client(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn
 
 Client::~Client()
 {
-    log_err("[%lu:%lu] miss_cnt:%lu", cli_id, coro_id, miss_cnt);
+    // log_err("[%lu:%lu] miss_cnt:%lu", cli_id, coro_id, miss_cnt);
 }
 
 task<> Client::reset_remote()
@@ -246,7 +246,7 @@ Retry:
     co_await std::move(read_meta);
     if(seg_meta->local_depth > dir->global_depth){
         // 远端segloc上发生了Global SPlit
-        log_err("[%lu:%lu:%lu]remote local_depth:%lu at segloc:%lx exceed local global depth%lu segptr:%lx",cli_id,coro_id,this->key_num,seg_meta->local_depth,segloc,dir->global_depth,segptr);
+        // log_err("[%lu:%lu:%lu]remote local_depth:%lu at segloc:%lx exceed local global depth%lu segptr:%lx",cli_id,coro_id,this->key_num,seg_meta->local_depth,segloc,dir->global_depth,segptr);
         if(seg_meta->local_depth <= MAX_DEPTH) dir->global_depth = seg_meta->local_depth;
         uint64_t new_seg_loc = get_seg_loc(pattern, dir->global_depth);
         co_await check_gd(new_seg_loc);
@@ -802,8 +802,8 @@ Retry:
             cli_id, coro_id, key_num, segloc, dir->segs[segloc].local_depth, dir->global_depth, cur_seg_ptr,
             dir->segs[segloc].main_seg_ptr);
     log_err("[%lu:%lu:%lu] segloc:%lx bit_loc:%lu bit_info:%16lx fp_bitmap[%lu]&bit_info = %lu",cli_id,coro_id,this->key_num,segloc,bit_loc,bit_info,bit_loc,seg_meta->fp_bitmap[bit_loc]&bit_info);
-    print_bit_map(seg_meta->fp_bitmap);
-    exit(-1);
+    // print_bit_map(seg_meta->fp_bitmap);
+    // exit(-1);
     co_return false;
 }
 
