@@ -186,6 +186,10 @@ task<> Client::sync_dir()
     co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, &dir->global_depth, 2 * sizeof(uint64_t), lmr->lkey);
     co_await conn->read(seg_rmr.raddr + sizeof(uint64_t), seg_rmr.rkey, dir->segs,
                         (1 << dir->global_depth) * sizeof(DirEntry), lmr->lkey);
+    uint64_t dir_size = (1 << dir->global_depth);
+    for(uint64_t i = 0 ; i < dir_size ; i++){
+        this->offset[i].main_seg_ptr = dir->segs[i].main_seg_ptr;
+    }
 }
 
 /// @brief 读取远端的Global Depth
@@ -696,45 +700,46 @@ Retry:
     // 3. Read SegMeta && MainSlots
     CurSegMeta *seg_meta = (CurSegMeta *)alloc.alloc(sizeof(CurSegMeta));
     // auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, sizeof(CurSegMeta), lmr->lkey);
-    // auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 4 * sizeof(uint64_t), lmr->lkey);
-    // auto read_bit_map = conn->read(cur_seg_ptr + 5 * sizeof(uint64_t) + bit_loc * sizeof(uint64_t), seg_rmr.rkey, &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
+    auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 4 * sizeof(uint64_t), lmr->lkey);
+    auto read_bit_map = wo_wait_conn->read(cur_seg_ptr + 5 * sizeof(uint64_t) + bit_loc * sizeof(uint64_t), seg_rmr.rkey, &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
     Slot *main_seg = (Slot *)alloc.alloc(main_size);
     auto read_main_seg = wo_wait_conn->read(main_seg_ptr + start_pos * sizeof(Slot), seg_rmr.rkey, main_seg, main_size, lmr->lkey);
-
+    
     // 4. Check Depth && MainSegPtr
-    // co_await std::move(read_meta);
-    // if (seg_meta->main_seg_ptr != this->offset[segloc].main_seg_ptr){
-    //     // 检查一遍Global Depth是否一致
-    //     // TODO:增加segloc参数，读取对应位置的cur_seg_ptr；否则split的信息无法被及时同步
-    //     uintptr_t new_cur_ptr = co_await check_gd(segloc);
-    //     uint64_t new_seg_loc = get_seg_loc(pattern, dir->global_depth);
-    //     if(new_cur_ptr != cur_seg_ptr || segloc != new_seg_loc){
-    //         log_err("[%lu:%lu:%lu]stale cur_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,cur_seg_ptr,new_cur_ptr);
-    //         this->offset[segloc].offset = 0;
-    //         this->offset[segloc].main_seg_ptr = dir->segs[segloc].main_seg_ptr;
-    //         // co_await std::move(read_bit_map);
-    //         co_await std::move(read_main_seg);
-    //         goto Retry;
-    //     } 
-    //     // 更新所有指向此Segment的DirEntry
-    //     uint64_t new_local_depth = seg_meta->local_depth;
-    //     uint64_t stride = (1llu) << (dir->global_depth - new_local_depth);
-    //     uint64_t cur_seg_loc;
-    //     uint64_t first_seg_loc = segloc & ((1ull << new_local_depth) - 1);
-    //     for (uint64_t i = 0; i < stride; i++)
-    //     {
-    //         cur_seg_loc = (i << new_local_depth) | first_seg_loc;
-    //         dir->segs[cur_seg_loc].main_seg_ptr = seg_meta->main_seg_ptr;
-    //         dir->segs[cur_seg_loc].main_seg_len = seg_meta->main_seg_len;
-    //         this->offset[cur_seg_loc].offset = 0;
-    //         this->offset[cur_seg_loc].main_seg_ptr = seg_meta->main_seg_ptr;
-    //         dir->segs[segloc].local_depth = seg_meta->local_depth;
-    //     }
-    //     // co_await std::move(read_bit_map);
-    //     co_await std::move(read_main_seg);
-    //     // 怎么同步信息；同步哪些信息
-    //     goto Retry;
-    // }
+    co_await std::move(read_meta);
+    if (seg_meta->main_seg_ptr != this->offset[segloc].main_seg_ptr){
+        // 检查一遍Global Depth是否一致
+        // TODO:增加segloc参数，读取对应位置的cur_seg_ptr；否则split的信息无法被及时同步
+        uintptr_t new_cur_ptr = co_await check_gd(segloc);
+        uint64_t new_seg_loc = get_seg_loc(pattern, dir->global_depth);
+        if(new_cur_ptr != cur_seg_ptr || segloc != new_seg_loc){
+            log_err("[%lu:%lu:%lu]stale cur_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,cur_seg_ptr,new_cur_ptr);
+            this->offset[segloc].offset = 0;
+            this->offset[segloc].main_seg_ptr = dir->segs[segloc].main_seg_ptr;
+            // co_await std::move(read_bit_map);
+            co_await std::move(read_main_seg);
+            goto Retry;
+        } 
+        // 更新所有指向此Segment的DirEntry
+        log_err("[%lu:%lu:%lu]stale main_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,seg_meta->main_seg_ptr,this->offset[segloc].main_seg_ptr);
+        uint64_t new_local_depth = seg_meta->local_depth;
+        uint64_t stride = (1llu) << (dir->global_depth - new_local_depth);
+        uint64_t cur_seg_loc;
+        uint64_t first_seg_loc = segloc & ((1ull << new_local_depth) - 1);
+        for (uint64_t i = 0; i < stride; i++)
+        {
+            cur_seg_loc = (i << new_local_depth) | first_seg_loc;
+            dir->segs[cur_seg_loc].main_seg_ptr = seg_meta->main_seg_ptr;
+            dir->segs[cur_seg_loc].main_seg_len = seg_meta->main_seg_len;
+            this->offset[cur_seg_loc].offset = 0;
+            this->offset[cur_seg_loc].main_seg_ptr = seg_meta->main_seg_ptr;
+            dir->segs[segloc].local_depth = seg_meta->local_depth;
+        }
+        // co_await std::move(read_bit_map);
+        co_await std::move(read_main_seg);
+        // 怎么同步信息；同步哪些信息
+        goto Retry;
+    }
 
     // 5. Find Slot && Read KV
     uint64_t version = UINT64_MAX;
@@ -772,30 +777,32 @@ Retry:
 
     // 5.2 Find In CurSeg
     // a. 判断Key是否出现在CurSeg中
-    // co_await std::move(read_bit_map);
-    // if ((seg_meta->fp_bitmap[bit_loc] & bit_info) != 0 || res==nullptr)
-    // {
-    //     Slot* curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_PER_SEG);
-    //     co_await conn->read(cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta), seg_rmr.rkey, curseg_slots, sizeof(Slot) * SLOT_PER_SEG, lmr->lkey);
-
-    //     for (uint64_t i = 0; i < SLOT_PER_SEG; i++)
-    //     {
-    //         // curseg_slots[i].print();
-    //         if (curseg_slots[i] != 0 && curseg_slots[i].fp == pattern_fp1 && curseg_slots[i].dep == dep_info && curseg_slots[i].fp_2 == pattern_fp2)
-    //         {
-    //             co_await conn->read(ralloc.ptr(curseg_slots[i].offset), seg_rmr.rkey, kv_block, (curseg_slots[i].len) * ALIGNED_SIZE, lmr->lkey);
-    //             if (memcmp(key->data, kv_block->data, key->len) == 0)
-    //             {
-    //                 if (kv_block->version > version || version == UINT64_MAX)
-    //                 {
-    //                     res_slot = i;
-    //                     version = kv_block->version;
-    //                     res = kv_block;
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
+    co_await std::move(read_bit_map);
+    // if ((seg_meta->fp_bitmap[bit_loc] & bit_info) == bit_info || res==nullptr)
+    if (res==nullptr)
+    {
+        log_err("[%lu:%lu:%lu]read at segloc:%lx",cli_id,coro_id,this->key_num,segloc);
+        Slot* curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_PER_SEG);
+        co_await conn->read(cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta), seg_rmr.rkey, curseg_slots, sizeof(Slot) * SLOT_PER_SEG, lmr->lkey);
+        for (uint64_t i = 0; i < SLOT_PER_SEG; i++)
+        {
+            // curseg_slots[i].print();
+            if (curseg_slots[i] != 0 && curseg_slots[i].fp == pattern_fp1 && curseg_slots[i].dep == dep_info && curseg_slots[i].fp_2 == pattern_fp2)
+            {
+                co_await conn->read(ralloc.ptr(curseg_slots[i].offset), seg_rmr.rkey, kv_block, (curseg_slots[i].len) * ALIGNED_SIZE, lmr->lkey);
+                log_err("[%lu:%lu:%lu]read at segloc:%lx cur_seg with: pattern_fp1:%lx pattern_fp2:%lx dep_info:%x seg slot:fp:%x fp2:%x dep:%x",cli_id,coro_id,this->key_num,segloc,pattern_fp1,pattern_fp2,dep_info,curseg_slots[i].fp,curseg_slots[i].fp_2,curseg_slots[i].dep);
+                if (memcmp(key->data, kv_block->data, key->len) == 0)
+                {
+                    if (kv_block->version > version || version == UINT64_MAX)
+                    {
+                        res_slot = i;
+                        version = kv_block->version;
+                        res = kv_block;
+                    }
+                }
+            }
+        }
+    }
 
     if (res != nullptr && res->v_len != 0)
     {
