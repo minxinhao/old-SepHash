@@ -597,7 +597,7 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
     cur_seg->seg_meta.main_seg_len = main_seg_size / sizeof(Slot) + SLOT_PER_SEG;
     this->offset[seg_loc].offset = 0;
     memset(cur_seg->seg_meta.fp_bitmap, 0, sizeof(uint64_t) * 16);
-    co_await wo_wait_conn->write(seg_ptr + 2 * sizeof(uint64_t), seg_rmr.rkey, ((uint64_t *)cur_seg) + 2, sizeof(CurSegMeta) - sizeof(uint64_t),lmr->lkey);
+    co_await conn->write(seg_ptr + 2 * sizeof(uint64_t), seg_rmr.rkey, ((uint64_t *)cur_seg) + 2, sizeof(CurSegMeta) - sizeof(uint64_t),lmr->lkey);
 
     // 5.2 Update new-main-ptr for DirEntries
     uint64_t stride = (1llu) << (dir->global_depth - local_depth);
@@ -747,12 +747,6 @@ Retry:
                         res_slot = i;
                         res = kv_block;
                         break;
-                        // if (kv_block->version > version || version == UINT64_MAX)
-                        // {
-                        //     res_slot = i;
-                        //     version = kv_block->version;
-                        //     res = kv_block;
-                        // }
                     }
                 }
             }
@@ -770,7 +764,6 @@ Retry:
         // exit(-1);
         Slot* curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_PER_SEG);
         co_await conn->read(cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta), seg_rmr.rkey, curseg_slots, sizeof(Slot) * SLOT_PER_SEG, lmr->lkey);
-        // for (uint64_t i = 0; i < SLOT_PER_SEG; i++)
         for (uint64_t i = SLOT_PER_SEG-1; i != -1; i--)
         {
             // curseg_slots[i].print();
@@ -783,12 +776,6 @@ Retry:
                     res_slot = i;
                     res = kv_block;
                     break;
-                    // if (kv_block->version > version || version == UINT64_MAX)
-                    // {
-                    //     res_slot = i;
-                    //     version = kv_block->version;
-                    //     res = kv_block;
-                    // }
                 }
             }
         }
