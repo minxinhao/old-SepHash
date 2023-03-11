@@ -220,6 +220,8 @@ task<> Client::insert(Slice *key, Slice *value)
     KVBlock *kv_block = InitKVBlock(key, value, &alloc);
     uint64_t kvblock_len = key->len + value->len + sizeof(uint64_t) * 3;
     uint64_t kvblock_ptr = ralloc.alloc(kvblock_len);
+    // a. writekv
+    wo_wait_conn->pure_write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey);
     retry_cnt = 0;
     this->key_num = *(uint64_t *)key->data;
 Retry:
@@ -244,7 +246,6 @@ Retry:
     uint64_t slots_len = SLOT_PER_SEG - seg_offset;
     slots_len = (slots_len < (2 * SLOT_BATCH_SIZE)) ? slots_len : SLOT_BATCH_SIZE;
     auto read_slots = wo_wait_conn->read(seg_slots_ptr, seg_rmr.rkey, seg_slots, sizeof(Slot) * slots_len, lmr->lkey);
-
 
     // c. 直接通过main_seg_ptr来判断一致性
     co_await std::move(read_meta);
@@ -291,7 +292,6 @@ Retry:
         goto Retry;
     }
 
-
     // 3. find free slot
     uint64_t sign = !seg_meta->sign;
     uint64_t slot_id = -1;
@@ -328,29 +328,25 @@ Retry:
     tmp->sign = seg_meta->sign;
     tmp->offset = ralloc.offset(kvblock_ptr);
 
-    // b. faa version
-    uintptr_t version_ptr = lock_rmr.raddr + sizeof(uint64_t) + (sizeof(uint64_t)) * (segloc % num_lock);
-    uint64_t *version = (uint64_t *)alloc.alloc(sizeof(uint64_t));
-    auto fetch_ver = wo_wait_conn->fetch_add(version_ptr, lock_rmr.rkey, *version, 1);
-
-    // c. cas slot
+    // b. cas slot
     uintptr_t slot_ptr = seg_slots_ptr + slot_id * sizeof(Slot);
-    if (!co_await conn->cas_n(slot_ptr, seg_rmr.rkey,
-                                (uint64_t)(seg_slots[slot_id]), *tmp))
+    if (!co_await conn->cas_n(slot_ptr, seg_rmr.rkey,(uint64_t)(seg_slots[slot_id]), *tmp))
     {
-        co_await std::move(fetch_ver);
         goto Retry;
     }
     // log_err("[%lu:%lu:%lu] segloc:%lx write at segoffset:%lu slot_id:%lu with: main_seg_ptr:%lx seg_meta:sign:%d",cli_id,coro_id,this->key_num,segloc,seg_offset,slot_id,this->offset[segloc].main_seg_ptr,seg_meta->sign);
-    // 5. write kv
-    co_await std::move(fetch_ver);
-    kv_block->version = *version;
-    wo_wait_conn->pure_write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey);
-
-    // 6. write fp2
+    
+    // 6. write fp2 && bitmap
+    // a. write fp2
     tmp->fp_2 = fp2(pattern);
     wo_wait_conn->pure_write(slot_ptr + sizeof(uint64_t), seg_rmr.rkey,
                                 &tmp->fp_2, sizeof(uint8_t), lmr->lkey);
+    // b. write fp bitmap
+    auto [bit_loc, bit_info] = get_fp_bit(tmp->fp, tmp->fp_2);
+    uintptr_t fp_ptr = segptr + (4 + bit_loc) * sizeof(uint64_t);
+    seg_meta->fp_bitmap[bit_loc] = seg_meta->fp_bitmap[bit_loc] | bit_info;
+    wo_wait_conn->pure_write(fp_ptr, seg_rmr.rkey,
+                                &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
 
     if (seg_offset + slot_id == SLOT_PER_SEG - 1)
     {
@@ -358,21 +354,6 @@ Retry:
         co_await Split(segloc, segptr, seg_meta);
         co_return;
     }
-
-    // TODO:可以搬到前面隐藏起来
-    // 7. write fp bitmap
-    auto [bit_loc, bit_info] = get_fp_bit(tmp->fp, tmp->fp_2);
-    uintptr_t fp_ptr = segptr + (4 + bit_loc) * sizeof(uint64_t);
-    seg_meta->fp_bitmap[bit_loc] = seg_meta->fp_bitmap[bit_loc] | bit_info;
-    wo_wait_conn->pure_write(fp_ptr, seg_rmr.rkey,
-                                &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
-    // while ((seg_meta->fp_bitmap[bit_loc]&bit_info)==0 )
-    // {
-    //     if(co_await conn->cas(fp_ptr, seg_rmr.rkey,
-    //                         seg_meta->fp_bitmap[bit_loc], seg_meta->fp_bitmap[bit_loc]| bit_info)){
-    //         break;
-    //     }
-    // }
 }
 
 void Client::merge_insert(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_seg_len, Slot *new_seg)
@@ -701,7 +682,7 @@ Retry:
     CurSegMeta *seg_meta = (CurSegMeta *)alloc.alloc(sizeof(CurSegMeta));
     // auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, sizeof(CurSegMeta), lmr->lkey);
     auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 4 * sizeof(uint64_t), lmr->lkey);
-    auto read_bit_map = wo_wait_conn->read(cur_seg_ptr + 5 * sizeof(uint64_t) + bit_loc * sizeof(uint64_t), seg_rmr.rkey, &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
+    // auto read_bit_map = wo_wait_conn->read(cur_seg_ptr + 5 * sizeof(uint64_t) + bit_loc * sizeof(uint64_t), seg_rmr.rkey, &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
     Slot *main_seg = (Slot *)alloc.alloc(main_size);
     auto read_main_seg = wo_wait_conn->read(main_seg_ptr + start_pos * sizeof(Slot), seg_rmr.rkey, main_seg, main_size, lmr->lkey);
     
@@ -750,6 +731,7 @@ Retry:
     uint8_t dep_info = (pattern >> dep) & 0xf;
 
     // 5.1 Find In Main
+    // 在Main中，相同FP的Slot，更新的Slot会被写入在更靠前的位置
     co_await std::move(read_main_seg);
     for(uint64_t cnt = 0 ; cnt < 2 ; cnt++){
         for (uint64_t i = 0; i < end_pos - start_pos; i++)
@@ -762,12 +744,15 @@ Retry:
                     co_await wo_wait_conn->read(ralloc.ptr(main_seg[i].offset), seg_rmr.rkey, kv_block,(main_seg[i].len) * ALIGNED_SIZE, lmr->lkey);
                     if (memcmp(key->data, kv_block->data, key->len) == 0)
                     {
-                        if (kv_block->version > version || version == UINT64_MAX)
-                        {
-                            res_slot = i;
-                            version = kv_block->version;
-                            res = kv_block;
-                        }
+                        res_slot = i;
+                        res = kv_block;
+                        break;
+                        // if (kv_block->version > version || version == UINT64_MAX)
+                        // {
+                        //     res_slot = i;
+                        //     version = kv_block->version;
+                        //     res = kv_block;
+                        // }
                     }
                 }
             }
@@ -776,15 +761,17 @@ Retry:
     }
 
     // 5.2 Find In CurSeg
-    // a. 判断Key是否出现在CurSeg中
-    co_await std::move(read_bit_map);
+    // 在CurSeg中，相同FP的Slot，更新的Slot会被写入在更靠后的位置
+    // co_await std::move(read_bit_map);
     // if ((seg_meta->fp_bitmap[bit_loc] & bit_info) == bit_info || res==nullptr)
     if (res==nullptr)
     {
-        log_err("[%lu:%lu:%lu]read at segloc:%lx",cli_id,coro_id,this->key_num,segloc);
+        // log_err("[%lu:%lu:%lu]read at segloc:%lx",cli_id,coro_id,this->key_num,segloc);
+        // exit(-1);
         Slot* curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_PER_SEG);
         co_await conn->read(cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta), seg_rmr.rkey, curseg_slots, sizeof(Slot) * SLOT_PER_SEG, lmr->lkey);
-        for (uint64_t i = 0; i < SLOT_PER_SEG; i++)
+        // for (uint64_t i = 0; i < SLOT_PER_SEG; i++)
+        for (uint64_t i = SLOT_PER_SEG-1; i != -1; i--)
         {
             // curseg_slots[i].print();
             if (curseg_slots[i] != 0 && curseg_slots[i].fp == pattern_fp1 && curseg_slots[i].dep == dep_info && curseg_slots[i].fp_2 == pattern_fp2)
@@ -793,12 +780,15 @@ Retry:
                 log_err("[%lu:%lu:%lu]read at segloc:%lx cur_seg with: pattern_fp1:%lx pattern_fp2:%lx dep_info:%x seg slot:fp:%x fp2:%x dep:%x",cli_id,coro_id,this->key_num,segloc,pattern_fp1,pattern_fp2,dep_info,curseg_slots[i].fp,curseg_slots[i].fp_2,curseg_slots[i].dep);
                 if (memcmp(key->data, kv_block->data, key->len) == 0)
                 {
-                    if (kv_block->version > version || version == UINT64_MAX)
-                    {
-                        res_slot = i;
-                        version = kv_block->version;
-                        res = kv_block;
-                    }
+                    res_slot = i;
+                    res = kv_block;
+                    break;
+                    // if (kv_block->version > version || version == UINT64_MAX)
+                    // {
+                    //     res_slot = i;
+                    //     version = kv_block->version;
+                    //     res = kv_block;
+                    // }
                 }
             }
         }

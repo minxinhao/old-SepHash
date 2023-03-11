@@ -75,7 +75,7 @@ struct KVBlock
 {
     uint64_t k_len;
     uint64_t v_len;
-    uint64_t version;
+    // uint64_t version;
     char data[0]; // 变长数组，用来保证KVBlock空间上的连续性，便于RDMA操作
 }__attribute__((aligned(1)));
 
