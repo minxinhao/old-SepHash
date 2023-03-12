@@ -680,8 +680,8 @@ Retry:
 
     // 3. Read SegMeta && MainSlots
     CurSegMeta *seg_meta = (CurSegMeta *)alloc.alloc(sizeof(CurSegMeta));
-    // auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, sizeof(CurSegMeta), lmr->lkey);
-    auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 4 * sizeof(uint64_t), lmr->lkey);
+    auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, sizeof(CurSegMeta), lmr->lkey);
+    // auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 4 * sizeof(uint64_t), lmr->lkey);
     // auto read_bit_map = wo_wait_conn->read(cur_seg_ptr + 5 * sizeof(uint64_t) + bit_loc * sizeof(uint64_t), seg_rmr.rkey, &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
     Slot *main_seg = (Slot *)alloc.alloc(main_size);
     auto read_main_seg = wo_wait_conn->read(main_seg_ptr + start_pos * sizeof(Slot), seg_rmr.rkey, main_seg, main_size, lmr->lkey);
@@ -760,8 +760,6 @@ Retry:
     // if ((seg_meta->fp_bitmap[bit_loc] & bit_info) == bit_info || res==nullptr)
     if (res==nullptr)
     {
-        // log_err("[%lu:%lu:%lu]read at segloc:%lx",cli_id,coro_id,this->key_num,segloc);
-        // exit(-1);
         Slot* curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_PER_SEG);
         co_await conn->read(cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta), seg_rmr.rkey, curseg_slots, sizeof(Slot) * SLOT_PER_SEG, lmr->lkey);
         for (uint64_t i = SLOT_PER_SEG-1; i != -1; i--)

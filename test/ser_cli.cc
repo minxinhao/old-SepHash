@@ -79,6 +79,8 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
     xoshiro256pp op_chooser;
     xoshiro256pp key_chooser;
     uint64_t num_op = config.num_op / (config.num_machine * config.num_cli * config.num_coro);
+    uint64_t load_avr = load_num / (config.num_machine * config.num_cli * config.num_coro);
+    // uint64_t load_avr = num_op;
     for (uint64_t i = 0; i < num_op; i++)
     {
         op_frac = op_chooser();
@@ -86,14 +88,15 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
         {
             tmp_key = GenKey(
                 load_num +
-                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
+                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * load_avr +
                 gen->operator()(key_chooser()));
             co_await cli->insert(&key, &value);
         }
         else if (op_frac < read_frac)
         {
+            ret_value.len = 0;
             tmp_key = GenKey(
-                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
+                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * load_avr +
                 gen->operator()(key_chooser()));
             co_await cli->search(&key, &ret_value);
             if (ret_value.len != value.len || memcmp(ret_value.data, value.data, value.len) != 0)
@@ -107,7 +110,7 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
         {
             // update
             tmp_key = GenKey(
-                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
+                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * load_avr +
                 gen->operator()(key_chooser()));
             co_await cli->update(&key,&update_value);
             // auto [slot_ptr, slot] = co_await cli->search(&key, &ret_value);
@@ -123,7 +126,7 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
         {
             // delete
             tmp_key = GenKey(
-                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * num_op +
+                (config.machine_id * config.num_cli * config.num_coro + cli_id * config.num_coro + coro_id) * load_avr +
                 gen->operator()(key_chooser()));
             co_await cli->remove(&key);
             // uint64_t cnt = 0;
