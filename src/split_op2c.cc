@@ -341,12 +341,6 @@ Retry:
     tmp->fp_2 = fp2(pattern);
     wo_wait_conn->pure_write(slot_ptr + sizeof(uint64_t), seg_rmr.rkey,
                                 &tmp->fp_2, sizeof(uint8_t), lmr->lkey);
-    // b. write fp bitmap
-    auto [bit_loc, bit_info] = get_fp_bit(tmp->fp, tmp->fp_2);
-    uintptr_t fp_ptr = segptr + (4 + bit_loc) * sizeof(uint64_t);
-    seg_meta->fp_bitmap[bit_loc] = seg_meta->fp_bitmap[bit_loc] | bit_info;
-    wo_wait_conn->pure_write(fp_ptr, seg_rmr.rkey,
-                                &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
 
     if (seg_offset + slot_id == SLOT_PER_SEG - 1)
     {
@@ -354,6 +348,13 @@ Retry:
         co_await Split(segloc, segptr, seg_meta);
         co_return;
     }
+    
+    // b. write fp bitmap
+    auto [bit_loc, bit_info] = get_fp_bit(tmp->fp, tmp->fp_2);
+    uintptr_t fp_ptr = segptr + (4 + bit_loc) * sizeof(uint64_t);
+    seg_meta->fp_bitmap[bit_loc] = seg_meta->fp_bitmap[bit_loc] | bit_info;
+    conn->pure_write(fp_ptr, seg_rmr.rkey,
+                                &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
 }
 
 void Client::merge_insert(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_seg_len, Slot *new_seg)
@@ -680,8 +681,8 @@ Retry:
 
     // 3. Read SegMeta && MainSlots
     CurSegMeta *seg_meta = (CurSegMeta *)alloc.alloc(sizeof(CurSegMeta));
-    auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, sizeof(CurSegMeta), lmr->lkey);
-    // auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 4 * sizeof(uint64_t), lmr->lkey);
+    // auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, sizeof(CurSegMeta), lmr->lkey);
+    auto read_meta = conn->read(cur_seg_ptr + sizeof(uint64_t), seg_rmr.rkey, seg_meta, 4 * sizeof(uint64_t), lmr->lkey);
     // auto read_bit_map = wo_wait_conn->read(cur_seg_ptr + 5 * sizeof(uint64_t) + bit_loc * sizeof(uint64_t), seg_rmr.rkey, &seg_meta->fp_bitmap[bit_loc], sizeof(uint64_t), lmr->lkey);
     Slot *main_seg = (Slot *)alloc.alloc(main_size);
     auto read_main_seg = wo_wait_conn->read(main_seg_ptr + start_pos * sizeof(Slot), seg_rmr.rkey, main_seg, main_size, lmr->lkey);
