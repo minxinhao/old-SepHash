@@ -243,7 +243,7 @@ Retry:
 
     // 4.1 Add Overflow
     if(cur_table->free_indirect_num < cur_table->logical_num/BUCKET_SIZE){
-        log_err("[%lu:%lu:%lu]Add Overflow with free_indirect_num:%lu",this->cli_id,this->coro_id,this->key_num,cur_table->free_indirect_num);
+        // log_err("[%lu:%lu:%lu]Add Overflow with free_indirect_num:%lu",this->cli_id,this->coro_id,this->key_num,cur_table->free_indirect_num);
         uint64_t new_buc_idx = cur_table->free_indirect_num + cur_table->logical_num;
         uintptr_t new_buc_ptr = cur_table->buc_start + new_buc_idx * sizeof(Bucket);
         // a. Edit Bucket list
@@ -261,9 +261,9 @@ Retry:
 
     }else{
         // 4.2 Resize
-        log_err("resize");
+        log_err("[%lu:%lu:%lu]resize",this->cli_id,this->coro_id,this->key_num);
         // a. alloc new table
-        log_err("Alloc new table");
+        // log_err("Alloc new table");
         dir->dir_lock = 1;
         uint64_t next_table = (dir->offset + 1) % table_num;
         dir->tables[next_table].logical_num = dir->tables[dir->offset].logical_num * 2;
@@ -283,16 +283,19 @@ Retry:
         for(uint64_t i = 0 ; i < upper ; i++){
             co_await conn->write(dir->tables[next_table].buc_start + i * batch_size, seg_rmr.rkey, local_buc, batch_size, lmr->lkey);
         }
+
+        // a. insert given key
+        co_await move_entry(kv_block,tmp);
         
-        // a. Move Data
-        log_err("Move Data");
+        // b. Move Data
+        // log_err("Move Data");
         upper = old_buc_num / bucket_batch_size;
         for(uint64_t i = 0 ; i < upper ; i++){
             co_await conn->read(dir->tables[dir->offset].buc_start + i * batch_size , seg_rmr.rkey,local_buc,batch_size,lmr->lkey);
             for(uint64_t buc_idx = 0 ; buc_idx < bucket_batch_size ; buc_idx++){
                 for(uint64_t entry_id = 0 ; entry_id < BUCKET_SIZE ; entry_id++){
-                    log_err("Move i:%lu buc_idx:%lu entry_id:%lu",i,buc_idx,entry_id);
-                    local_buc[buc_idx].entrys[entry_id].print();
+                    // log_err("Move i:%lu buc_idx:%lu entry_id:%lu",i,buc_idx,entry_id);
+                    // local_buc[buc_idx].entrys[entry_id].print();
                     co_await conn->read(ralloc.ptr(local_buc[buc_idx].entrys[entry_id].offset), seg_rmr.rkey, kv_block,(local_buc[buc_idx].entrys[entry_id].len)*ALIGNED_SIZE, lmr->lkey);
                     co_await move_entry(kv_block,&local_buc[buc_idx].entrys[entry_id]);
                 }
@@ -300,7 +303,7 @@ Retry:
         }
         alloc.free(batch_size);
 
-        // b. Edit Global offset
+        // c. Edit Global offset
         dir->offset = next_table;
         co_await conn->write(seg_rmr.raddr+sizeof(uint64_t), seg_rmr.rkey, &dir->offset, sizeof(uint64_t)+table_num*sizeof(TableHeader), lmr->lkey);
     }
@@ -351,7 +354,7 @@ task<> Client::move_entry(KVBlock* kv_block,Entry* entry){
     // 4 write entry
     if (entry_id != -1)
     {
-        log_err("Move %lu to new buc:%lu",*(uint64_t*)kv_block->data,buc_idx);
+        // log_err("Move %lu to new buc:%lu",*(uint64_t*)kv_block->data,buc_idx);
         uintptr_t slot_ptr = buc_ptr + sizeof(uint64_t) * 2 + sizeof(Entry) * entry_id;
         co_await conn->write(slot_ptr, seg_rmr.rkey, entry, sizeof(Entry), lmr->lkey);
         alloc.offset = old_offset;
@@ -363,7 +366,7 @@ task<> Client::move_entry(KVBlock* kv_block,Entry* entry){
     uint64_t new_buc_idx = new_table->free_indirect_num + new_table->logical_num;
     uintptr_t new_buc_ptr = new_table->buc_start + new_buc_idx * sizeof(Bucket);
     new_table->free_indirect_num++;
-    log_err("Add overflow for bucidx:%lx with free_indirect_num:%lu logical_num:%lu",buc_idx,new_table->free_indirect_num,new_table->logical_num);
+    // log_err("Add overflow for bucidx:%lx with free_indirect_num:%lu logical_num:%lu",buc_idx,new_table->free_indirect_num,new_table->logical_num);
     // a. Edit Bucket list
     buc->next = new_buc_ptr;
     co_await conn->write(buc_ptr + sizeof(uint64_t),seg_rmr.rkey,&(buc->next),sizeof(uint64_t),lmr->lkey);
