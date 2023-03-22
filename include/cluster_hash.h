@@ -26,12 +26,14 @@ constexpr uint64_t BUCKET_SIZE = 8;
 // 以 MAX_SEG_LEN:16 SLOT_PER_SEG:110为例，比例为(1+16)*110/8 = 234
 constexpr uint64_t DIR_RATIO = 256;
 constexpr uint64_t INIT_TABLE_SIZE = (1 << 4) * DIR_RATIO;
+// constexpr uint64_t INIT_TABLE_SIZE = (1 << 14) * DIR_RATIO;
 // DIR空间开销为(1 << 16) * 64 * 10 /(1<<20) = 40 MB
 constexpr uint64_t MAX_TABLE_SIZE = (1 << 16) * DIR_RATIO;
 // 可以指向bucket array的数组大小，用来在resize时存放old/new两个表的header信息
 constexpr uint64_t table_num = 2; 
 // Move Data和清空远端Bucket Array时，批量读取的Bucket的数量
-constexpr uint64_t bucket_batch_size = (INIT_TABLE_SIZE + (INIT_TABLE_SIZE/BUCKET_SIZE)) ; 
+constexpr uint64_t zero_size = (1 << 4) * DIR_RATIO;
+constexpr uint64_t bucket_batch_size = (zero_size + (zero_size/BUCKET_SIZE)) ; 
 
 
 // 64KB的dev mem，用作lock

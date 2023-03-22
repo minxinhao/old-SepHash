@@ -111,11 +111,15 @@ task<> Client::reset_remote()
     // 重置远端segment
     dir->tables[0].logical_num = INIT_TABLE_SIZE;
     dir->tables[0].free_indirect_num = 1; // Drtm omit the first indirect node, which i didn't understand
-    uint64_t buc_num = INIT_TABLE_SIZE + INIT_TABLE_SIZE / BUCKET_SIZE;
-    dir->tables[0].buc_start = (uintptr_t)server_alloc.alloc(buc_num * sizeof(Bucket));
-    Bucket *local_buc = (Bucket *)alloc.alloc(buc_num * sizeof(Bucket));
-    memset(local_buc, 0, sizeof(Bucket) * buc_num);
-    co_await conn->write(dir->tables[0].buc_start, seg_rmr.rkey, local_buc, sizeof(Bucket) * buc_num, lmr->lkey);
+    uint64_t buc_num = INIT_TABLE_SIZE + INIT_TABLE_SIZE/BUCKET_SIZE;
+    dir->tables[0].buc_start = (uintptr_t)server_alloc.alloc(bucket_batch_size * sizeof(Bucket));
+    Bucket *local_buc = (Bucket *)alloc.alloc(bucket_batch_size * sizeof(Bucket));
+    memset(local_buc, 0, sizeof(Bucket) * bucket_batch_size);
+    uint64_t upper = buc_num / bucket_batch_size; // 保证buc_num能够整除bucket_batch_size
+    uint64_t batch_size = bucket_batch_size * sizeof(Bucket);
+    for(uint64_t i = 0 ; i < upper ; i++){
+        co_await conn->write(dir->tables[0].buc_start + i * batch_size, seg_rmr.rkey, local_buc, batch_size, lmr->lkey);
+    }
 
     // 重置远端 Directory
     co_await conn->write(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
@@ -211,7 +215,7 @@ Retry:
     // 2.2 lock bucket
     if (!co_await conn->cas_n(fisrt_buc_ptr, seg_rmr.rkey, 0, 1))
     {
-        log_err("[%lu:%lu:%lu] fail to lock bucket list:%lu",this->cli_id,this->coro_id,this->key_num,buc_idx);
+        // log_err("[%lu:%lu:%lu] fail to lock bucket list:%lu",this->cli_id,this->coro_id,this->key_num,buc_idx);
         goto Retry;
     }
 
@@ -237,7 +241,7 @@ Retry:
     // 4.1 lock dir
     if (!co_await conn->cas_n(seg_rmr.raddr, seg_rmr.rkey, 0, 1))
     {
-        log_err("[%lu:%lu:%lu] fail to lock dir",this->cli_id,this->coro_id,this->key_num);
+        // log_err("[%lu:%lu:%lu] fail to lock dir",this->cli_id,this->coro_id,this->key_num);
         goto Retry;
     }
 
