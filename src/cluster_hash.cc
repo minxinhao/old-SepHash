@@ -234,6 +234,12 @@ Retry:
     buc->lock = 0;
     co_await conn->write(fisrt_buc_ptr, seg_rmr.rkey, &buc->lock, sizeof(uint64_t), lmr->lkey);
     if(entry_id != -1){
+        // co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
+        // if (dir->dir_lock)
+        // {
+        //     // Resizing
+        //     goto Retry;
+        // }
         co_return;
     }
 
@@ -300,8 +306,10 @@ Retry:
                 for(uint64_t entry_id = 0 ; entry_id < BUCKET_SIZE ; entry_id++){
                     // log_err("Move i:%lu buc_idx:%lu entry_id:%lu",i,buc_idx,entry_id);
                     // local_buc[buc_idx].entrys[entry_id].print();
-                    co_await conn->read(ralloc.ptr(local_buc[buc_idx].entrys[entry_id].offset), seg_rmr.rkey, kv_block,(local_buc[buc_idx].entrys[entry_id].len)*ALIGNED_SIZE, lmr->lkey);
-                    co_await move_entry(kv_block,&local_buc[buc_idx].entrys[entry_id]);
+                    if(local_buc[buc_idx].entrys[entry_id].offset!=0){
+                        co_await conn->read(ralloc.ptr(local_buc[buc_idx].entrys[entry_id].offset), seg_rmr.rkey, kv_block,(local_buc[buc_idx].entrys[entry_id].len)*ALIGNED_SIZE, lmr->lkey);
+                        co_await move_entry(kv_block,&local_buc[buc_idx].entrys[entry_id]);
+                    }
                 }
             }
         }
