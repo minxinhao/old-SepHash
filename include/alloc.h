@@ -73,4 +73,9 @@ struct Alloc{
         assert(offset < buf_size);
         return res;
     }
+
+    void free(uint64_t size, bool align = false)
+    {
+        offset -= size;
+    }
 };

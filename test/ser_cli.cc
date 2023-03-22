@@ -12,14 +12,15 @@
 #include "split_op2b.h"
 #include "split_op2c.h"
 #include "rdma_bench.h"
+#include "cluster_hash.h"
 #include <set>
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
-uint64_t load_num = 10000000;
-using ClientType = SPLIT_OP2B::Client;
-using ServerType = SPLIT_OP2B::Server;
-using Slice = SPLIT_OP2B::Slice;
+uint64_t load_num = 100000;
+using ClientType = CLUSTER::Client;
+using ServerType = CLUSTER::Server;
+using Slice = CLUSTER::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {

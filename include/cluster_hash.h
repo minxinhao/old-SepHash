@@ -30,16 +30,14 @@ constexpr uint64_t INIT_TABLE_SIZE = (1 << 4) * DIR_RATIO;
 constexpr uint64_t MAX_TABLE_SIZE = (1 << 16) * DIR_RATIO;
 // 可以指向bucket array的数组大小，用来在resize时存放old/new两个表的header信息
 constexpr uint64_t table_num = 2; 
-// Move Data时，批量读取的Bucket的数量,这里和ZERO_SIZE对齐
-constexpr uint64_t bucket_batch_size = 64 * (1<<20); 
+// Move Data和清空远端Bucket Array时，批量读取的Bucket的数量
+constexpr uint64_t bucket_batch_size = (INIT_TABLE_SIZE + (INIT_TABLE_SIZE/BUCKET_SIZE)) ; 
 
 
 // 64KB的dev mem，用作lock
 constexpr uint64_t dev_mem_size = (1 << 10) * 64;
 // aligned size of len bitfield in DepSlot
 constexpr uint64_t ALIGNED_SIZE = 64;
-// Resize时用来清空远端bucket的空间上线
-constexpr uint64_t ZERO_SIZE = 64 * (1<<20);
 
 struct Slice
 {
@@ -76,6 +74,9 @@ struct Entry
     {
         return *(uint64_t *)this;
     }
+    void print(){
+        log_err("valid:%d len:%d fp:%x offset:%lx",valid,len,fp,offset);
+    }
 } __attribute__((aligned(1)));
 
 struct Bucket
@@ -99,11 +100,17 @@ struct Directory
 {
     // Size of Directory
     uint64_t dir_lock;
-    uint8_t offset; // cur table header offset in below array, prev table is at offset - 1
+    uint64_t offset; // cur table header offset in below array, prev table is at offset - 1
     TableHeader tables[table_num];
     // 为多客户端同步保留的字段，不影响原有空间布局
     uint64_t start_cnt;
-
+    void print(){
+        log_err("dir_lock:%lu",dir_lock);
+        log_err("offset:%lu",offset);
+        for(uint64_t i = 0 ; i < table_num ; i++ ){
+            log_err("table:%lu logical_num:%lu free_indirect_num:%lu buc_start:%lx",i,tables[i].logical_num,tables[i].free_indirect_num,tables[i].buc_start);
+        }
+    }
 } __attribute__((aligned(1)));
 
 class Client : public BasicDB

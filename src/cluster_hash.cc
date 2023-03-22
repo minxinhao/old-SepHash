@@ -165,9 +165,11 @@ task<> Client::insert(Slice *key, Slice *value)
     this->key_num = *(uint64_t *)key->data;
 
 Retry:
+    // log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
     // 1. Read TableHeader && Bucket
     // 1.1 Read Directory (less than 64 bytes)
     co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
+    // dir->print();
     // TODO : Split可以实现单条slot CAS和批量Move两种方式
     if (dir->dir_lock)
     {
@@ -209,6 +211,7 @@ Retry:
     // 2.2 lock bucket
     if (!co_await conn->cas_n(fisrt_buc_ptr, seg_rmr.rkey, 0, 1))
     {
+        log_err("[%lu:%lu:%lu] fail to lock bucket list:%lu",this->cli_id,this->coro_id,this->key_num,buc_idx);
         goto Retry;
     }
 
@@ -225,7 +228,7 @@ Retry:
 
     // 2.4 unlock bucket list
     buc->lock = 0;
-    wo_wait_conn->pure_write(fisrt_buc_ptr, seg_rmr.rkey, &buc->lock, sizeof(uint64_t), lmr->lkey);
+    co_await conn->write(fisrt_buc_ptr, seg_rmr.rkey, &buc->lock, sizeof(uint64_t), lmr->lkey);
     if(entry_id != -1){
         co_return;
     }
@@ -234,27 +237,33 @@ Retry:
     // 4.1 lock dir
     if (!co_await conn->cas_n(seg_rmr.raddr, seg_rmr.rkey, 0, 1))
     {
+        log_err("[%lu:%lu:%lu] fail to lock dir",this->cli_id,this->coro_id,this->key_num);
         goto Retry;
     }
 
-    // 4.1 Alloc New Indirect Bucket
-    uintptr_t free_indirect_ptr = seg_rmr.raddr + sizeof(uint64_t) + sizeof(uint8_t) + dir->offset * sizeof(TableHeader) + sizeof(uint64_t);
-    co_await wo_wait_conn->fetch_add(free_indirect_ptr, lock_rmr.rkey, dir->tables[dir->offset].free_indirect_num, 1);
-
-    // 4.2 Add Overflow
+    // 4.1 Add Overflow
     if(cur_table->free_indirect_num < cur_table->logical_num/BUCKET_SIZE){
+        log_err("[%lu:%lu:%lu]Add Overflow with free_indirect_num:%lu",this->cli_id,this->coro_id,this->key_num,cur_table->free_indirect_num);
         uint64_t new_buc_idx = cur_table->free_indirect_num + cur_table->logical_num;
         uintptr_t new_buc_ptr = cur_table->buc_start + new_buc_idx * sizeof(Bucket);
         // a. Edit Bucket list
         buc->next = new_buc_ptr;
-        wo_wait_conn->pure_write(buc_ptr + sizeof(uint64_t),seg_rmr.rkey,&(buc->next),sizeof(uint64_t),lmr->lkey);
+        co_await conn->write(buc_ptr + sizeof(uint64_t),seg_rmr.rkey,&(buc->next),sizeof(uint64_t),lmr->lkey);
         // b. write entry
-        uintptr_t slot_ptr = new_buc_ptr + sizeof(uint64_t) * 2;
-        co_await conn->write(slot_ptr, seg_rmr.rkey, tmp, sizeof(Entry), lmr->lkey);
+        memset(buc,0,sizeof(Bucket));
+        buc->entrys[0]=*tmp;
+        co_await conn->write(new_buc_ptr, seg_rmr.rkey, buc, sizeof(Bucket), lmr->lkey);
+        // c. write free_indirect_num
+        uintptr_t free_indirect_ptr = seg_rmr.raddr + sizeof(uint64_t) + sizeof(uint64_t) + dir->offset * sizeof(TableHeader) + sizeof(uint64_t);
+        dir->tables[dir->offset].free_indirect_num++;
+        co_await conn->write(free_indirect_ptr, seg_rmr.rkey, &(dir->tables[dir->offset].free_indirect_num),sizeof(uint64_t),lmr->lkey);
+        // log_err("[%lu:%lu:%lu]Add buc_idx:%lu buc_ptr:%lx with new overflow:%lx",this->cli_id,this->coro_id,this->key_num,buc_idx,buc_ptr,new_buc_ptr);
 
     }else{
-        // 4.3 Resize
+        // 4.2 Resize
+        log_err("resize");
         // a. alloc new table
+        log_err("Alloc new table");
         dir->dir_lock = 1;
         uint64_t next_table = (dir->offset + 1) % table_num;
         dir->tables[next_table].logical_num = dir->tables[dir->offset].logical_num * 2;
@@ -266,39 +275,30 @@ Retry:
         uint64_t old_buc_num = dir->tables[dir->offset].logical_num + dir->tables[dir->offset].logical_num /BUCKET_SIZE; 
         dir->tables[next_table].buc_start = dir->tables[dir->offset].buc_start;
         dir->tables[next_table].buc_start += old_buc_num * sizeof(Bucket);
-        // 由于空间限制，只能一部分一部分的清零,目前设置上限64MB
-        if(buc_num * sizeof(Bucket)>ZERO_SIZE){
-            Bucket* local_buc = (Bucket*)alloc.alloc(ZERO_SIZE);
-            memset(local_buc,0,ZERO_SIZE);
-            uint64_t upper = (buc_num * sizeof(Bucket) + ZERO_SIZE - 1 ) / ZERO_SIZE;
-            for(uint64_t i = 0 ; i < upper ; i++){
-                co_await conn->write(dir->tables[next_table].buc_start + i * ZERO_SIZE, seg_rmr.rkey, local_buc, ZERO_SIZE, lmr->lkey);
-            }
-        }else{
-            Bucket* local_buc = (Bucket*)alloc.alloc(sizeof(Bucket)*buc_num);
-            memset(local_buc,0,sizeof(Bucket)*buc_num);
-            co_await conn->write(dir->tables[next_table].buc_start, seg_rmr.rkey, local_buc, sizeof(Bucket)*buc_num, lmr->lkey);
+        // 由于空间限制，只能一部分一部分的清零
+        uint64_t batch_size = bucket_batch_size*sizeof(Bucket);
+        Bucket* local_buc = (Bucket*)alloc.alloc(batch_size);
+        memset(local_buc,0,batch_size);
+        uint64_t upper = buc_num / bucket_batch_size; // 保证buc_num能够整除bucket_batch_size
+        for(uint64_t i = 0 ; i < upper ; i++){
+            co_await conn->write(dir->tables[next_table].buc_start + i * batch_size, seg_rmr.rkey, local_buc, batch_size, lmr->lkey);
         }
         
         // a. Move Data
-        if(old_buc_num * sizeof(Bucket)>ZERO_SIZE){
-            Bucket* local_buc = (Bucket*)alloc.alloc(ZERO_SIZE);
-            memset(local_buc,0,ZERO_SIZE);
-            uint64_t upper = (buc_num * sizeof(Bucket) + ZERO_SIZE - 1 ) / ZERO_SIZE;
-            for(uint64_t i = 0 ; i < upper ; i++){
-                co_await conn->write(dir->tables[next_table].buc_start + i * ZERO_SIZE, seg_rmr.rkey, local_buc, ZERO_SIZE, lmr->lkey);
-            }
-        }else{
-            Bucket* local_buc = (Bucket*)alloc.alloc(sizeof(Bucket)*old_buc_num);
-            co_await conn->read(dir->tables[next_table].buc_start, seg_rmr.rkey, local_buc, sizeof(Bucket)*old_buc_num, lmr->lkey);
-            KVBlock *kv_block = (KVBlock *)alloc.alloc(7*ALIGNED_SIZE);
-            for(uint64_t i = 0 ; i < old_buc_num ; i++){
+        log_err("Move Data");
+        upper = old_buc_num / bucket_batch_size;
+        for(uint64_t i = 0 ; i < upper ; i++){
+            co_await conn->read(dir->tables[dir->offset].buc_start + i * batch_size , seg_rmr.rkey,local_buc,batch_size,lmr->lkey);
+            for(uint64_t buc_idx = 0 ; buc_idx < bucket_batch_size ; buc_idx++){
                 for(uint64_t entry_id = 0 ; entry_id < BUCKET_SIZE ; entry_id++){
-                    co_await conn->read(ralloc.ptr(local_buc->entrys[entry_id].offset), seg_rmr.rkey, kv_block,local_buc->entrys[entry_id].len, lmr->lkey);
-                    co_await move_entry(kv_block,&local_buc[i].entrys[entry_id]);
+                    log_err("Move i:%lu buc_idx:%lu entry_id:%lu",i,buc_idx,entry_id);
+                    local_buc[buc_idx].entrys[entry_id].print();
+                    co_await conn->read(ralloc.ptr(local_buc[buc_idx].entrys[entry_id].offset), seg_rmr.rkey, kv_block,(local_buc[buc_idx].entrys[entry_id].len)*ALIGNED_SIZE, lmr->lkey);
+                    co_await move_entry(kv_block,&local_buc[buc_idx].entrys[entry_id]);
                 }
             }
         }
+        alloc.free(batch_size);
 
         // b. Edit Global offset
         dir->offset = next_table;
@@ -307,7 +307,7 @@ Retry:
     
     // 4.4 Unlock Dir  
     dir->dir_lock = 0;  
-    wo_wait_conn->pure_write(seg_rmr.raddr, seg_rmr.rkey, &dir->dir_lock, sizeof(uint64_t), lmr->lkey);
+    co_await conn->write(seg_rmr.raddr, seg_rmr.rkey, &dir->dir_lock, sizeof(uint64_t), lmr->lkey);
 
 }
 
@@ -351,6 +351,7 @@ task<> Client::move_entry(KVBlock* kv_block,Entry* entry){
     // 4 write entry
     if (entry_id != -1)
     {
+        log_err("Move %lu to new buc:%lu",*(uint64_t*)kv_block->data,buc_idx);
         uintptr_t slot_ptr = buc_ptr + sizeof(uint64_t) * 2 + sizeof(Entry) * entry_id;
         co_await conn->write(slot_ptr, seg_rmr.rkey, entry, sizeof(Entry), lmr->lkey);
         alloc.offset = old_offset;
@@ -362,9 +363,10 @@ task<> Client::move_entry(KVBlock* kv_block,Entry* entry){
     uint64_t new_buc_idx = new_table->free_indirect_num + new_table->logical_num;
     uintptr_t new_buc_ptr = new_table->buc_start + new_buc_idx * sizeof(Bucket);
     new_table->free_indirect_num++;
+    log_err("Add overflow for bucidx:%lx with free_indirect_num:%lu logical_num:%lu",buc_idx,new_table->free_indirect_num,new_table->logical_num);
     // a. Edit Bucket list
     buc->next = new_buc_ptr;
-    wo_wait_conn->pure_write(buc_ptr + sizeof(uint64_t),seg_rmr.rkey,&(buc->next),sizeof(uint64_t),lmr->lkey);
+    co_await conn->write(buc_ptr + sizeof(uint64_t),seg_rmr.rkey,&(buc->next),sizeof(uint64_t),lmr->lkey);
     // b. write entry
     uintptr_t slot_ptr = new_buc_ptr + sizeof(uint64_t) * 2;
     co_await conn->write(slot_ptr, seg_rmr.rkey, entry, sizeof(Entry), lmr->lkey);
@@ -403,7 +405,7 @@ Retry:
     Bucket *buc = (Bucket *)alloc.alloc(sizeof(Bucket));
     co_await conn->read(buc_ptr, seg_rmr.rkey, buc, sizeof(Bucket), lmr->lkey);
     uintptr_t next_buc = buc->next;
-
+    // log_err("[%lu:%lu:%lu]buc_idx:%lu buc_ptr:%lx next_buc:%lx",this->cli_id,this->coro_id,this->key_num,buc_idx,buc_ptr,next_buc);
     // 2. Find Free Entry
     // 2.1 search in bucket list
     uint64_t entry_id = -1;
@@ -418,6 +420,7 @@ Retry:
                 co_await conn->read(ralloc.ptr(buc->entrys[i].offset), seg_rmr.rkey, kv_block,(buc->entrys[i].len) * ALIGNED_SIZE, lmr->lkey);
                 if (memcmp(key->data, kv_block->data, key->len) == 0)
                 {
+                    // log_err("[%lu:%lu:%lu]find key:%lu with value:%s",this->cli_id,this->coro_id,this->key_num,*(uint64_t*)kv_block->data,kv_block->data+sizeof(uint64_t));
                     res = kv_block;
                     break;
                 }
@@ -441,7 +444,7 @@ Retry:
     }
 
     log_err("[%lu:%lu:%lu]No mathc key",this->cli_id,this->coro_id,this->key_num);
-    exit(-1);
+    // exit(-1);
     co_return false;
 }
 
