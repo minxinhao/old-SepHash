@@ -50,6 +50,9 @@ struct KVBlock
     uint64_t k_len;
     uint64_t v_len;
     char data[0];
+    void print(){
+        log_err("klen:%lu key:%lu vlen:%lu value:%s",k_len,*(uint64_t*)data,v_len,data+sizeof(uint64_t));
+    }
 } __attribute__((aligned(1)));
 
 template <typename Alloc>

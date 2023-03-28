@@ -187,7 +187,12 @@ task<> Client::insert(Slice *key, Slice *value)
 Retry:
     retry_cnt++;
     if(retry_cnt >= 10) exit(-1);
-    alloc.ReSet(sizeof(Directory));
+    if (op_cnt % 2)
+        alloc.ReSet(sizeof(Directory) + kvblock_len + op_size + 8 * ALIGNED_SIZE);
+    else
+        alloc.ReSet(sizeof(Directory) + kvblock_len + 8 * ALIGNED_SIZE);
+
+    // log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
     // 1. Read Header
     co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);    
 
@@ -232,22 +237,27 @@ Retry:
             buc_ptr = (i==0)? buc_ptr1:buc_ptr2;
             for(uint64_t entry_id = 0 ; entry_id < BUCKET_SIZE ; entry_id++){
                 uint64_t buc_id = (i==0)? buc_idx1:buc_idx2;
-                
-                if(buc->entrys[entry_id] == 0){
+                // buc->entrys[entry_id].print();
+
+                if(buc->entrys[entry_id] == 0)
+                {
                     free_slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
                     // if(level_id == 1) break;
                     continue;
                 }
-                // if(buc->entrys[entry_id].fp == tmp_fp){
-                //     co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, tmp_block,(buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
-                //     if (memcmp(key->data, tmp_block->data, key->len) == 0)
-                //     {
-                //         // duplicate key : delete
-                //         log_err("[%lu:%lu:%lu]duplicate",this->cli_id,this->coro_id,this->key_num);
-                //         uintptr_t slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
-                //         co_await conn->cas_n(slot_ptr, seg_rmr.rkey,buc->entrys[entry_id], 0);
-                //     }
-                // }
+                if(buc->entrys[entry_id].fp == tmp_fp)
+                {
+                    // log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
+                    co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, tmp_block,(buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
+                    // tmp_block->print();
+                    // if (memcmp(key->data, tmp_block->data, key->len) == 0)
+                    // {
+                    //     // duplicate key : delete
+                    //     log_err("[%lu:%lu:%lu]duplicate",this->cli_id,this->coro_id,this->key_num);
+                    //     uintptr_t slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
+                    //     co_await conn->cas_n(slot_ptr, seg_rmr.rkey,buc->entrys[entry_id], 0);
+                    // }
+                }
             }
         }
         // if(level_id != 0 && free_slot_ptr != -1) break;
