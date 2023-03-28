@@ -124,14 +124,14 @@ task<> Client::reset_remote()
     cur_table->capacity = INIT_TABLE_SIZE;
     uint64_t upper = INIT_TABLE_SIZE / zero_size ;
     for(uint64_t i = 0 ; i < upper ; i++){
-        co_await conn->write(dir->last_level+sizeof(LevelTable)+i*zero_size,seg_rmr.rkey,cur_table->buckets,sizeof(Bucket)*zero_size,lmr->lkey);
+        co_await conn->write(dir->last_level+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),seg_rmr.rkey,cur_table->buckets,sizeof(Bucket)*zero_size,lmr->lkey);
     }
     
     cur_table->up = 0;
     cur_table->capacity = INIT_TABLE_SIZE*2;
     upper = cur_table->capacity / zero_size ;
     for(uint64_t i = 0 ; i < upper ; i++){
-        co_await conn->write(dir->first_level+sizeof(LevelTable)+i*zero_size,seg_rmr.rkey,cur_table->buckets,sizeof(Bucket)*zero_size,lmr->lkey);
+        co_await conn->write(dir->first_level+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),seg_rmr.rkey,cur_table->buckets,sizeof(Bucket)*zero_size,lmr->lkey);
     }
 
     // 重置远端 Directory
@@ -183,10 +183,13 @@ task<> Client::insert(Slice *key, Slice *value)
     wo_wait_conn->pure_write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey);
     retry_cnt = 0;
     this->key_num = *(uint64_t *)key->data;
-
+    KVBlock *tmp_block = (KVBlock *)alloc.alloc(8 * ALIGNED_SIZE,true);
 Retry:
+    retry_cnt++;
+    if(retry_cnt >= 10) exit(-1);
+    alloc.ReSet(sizeof(Directory));
     // 1. Read Header
-    co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
+    co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);    
 
     // 2. Find Duplicate or Free Slot
     // https://www.icyf.me/2020/09/04/paper-atc20-clevel/
@@ -197,10 +200,10 @@ Retry:
     uintptr_t cur_table_ptr = dir->last_level;
     Bucket * buc1 = (Bucket*)alloc.alloc(sizeof(Bucket));
     Bucket * buc2 = (Bucket*)alloc.alloc(sizeof(Bucket));
+    Bucket * buc3 = (Bucket*)alloc.alloc(sizeof(Bucket));
     uint64_t level_id = 0;
-    uint64_t free_slot_id ;
     uintptr_t free_slot_ptr = -1;
-    uint64_t first_level_capacity = -1;
+    uint64_t first_level_ptr = -1;
 
     while(cur_table_ptr != 0){
         // 2.1 Read LevelTable Header : capacity,up
@@ -208,7 +211,6 @@ Retry:
         uint64_t buc_idx1,buc_idx2;
         buc_idx1 = pattern_1 % cur_table->capacity;
         buc_idx2 = pattern_2 % cur_table->capacity;
-        if(first_level_capacity==-1) first_level_capacity = cur_table->capacity;
         
         // 2.2 Read 2 Bucket
         uintptr_t buc_ptr1 = cur_table_ptr + sizeof(LevelTable) + buc_idx1 * sizeof(Bucket);
@@ -229,28 +231,33 @@ Retry:
             buc = (i==0)? buc1:buc2;
             buc_ptr = (i==0)? buc_ptr1:buc_ptr2;
             for(uint64_t entry_id = 0 ; entry_id < BUCKET_SIZE ; entry_id++){
-                if(buc->entrys[entry_id].offset == 0){
-                    free_slot_id = level_id;
-                    free_slot_ptr = buc_ptr1 + sizeof(Entry) * entry_id;
+                uint64_t buc_id = (i==0)? buc_idx1:buc_idx2;
+                
+                if(buc->entrys[entry_id] == 0){
+                    free_slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
+                    // if(level_id == 1) break;
                     continue;
                 }
-                if(buc->entrys[entry_id].fp == tmp_fp){
-                    KVBlock *kv_block = (KVBlock *)alloc.alloc(7 * ALIGNED_SIZE);
-                    co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, kv_block,(buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
-                    if (memcmp(key->data, kv_block->data, key->len) == 0)
-                    {
-                        // duplicate key : delete
-                        uintptr_t slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
-                        co_await conn->cas_n(slot_ptr, seg_rmr.rkey,buc->entrys[entry_id], 0);
-                    }
-                }
+                // if(buc->entrys[entry_id].fp == tmp_fp){
+                //     co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, tmp_block,(buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
+                //     if (memcmp(key->data, tmp_block->data, key->len) == 0)
+                //     {
+                //         // duplicate key : delete
+                //         log_err("[%lu:%lu:%lu]duplicate",this->cli_id,this->coro_id,this->key_num);
+                //         uintptr_t slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
+                //         co_await conn->cas_n(slot_ptr, seg_rmr.rkey,buc->entrys[entry_id], 0);
+                //     }
+                // }
             }
         }
+        // if(level_id != 0 && free_slot_ptr != -1) break;
+        first_level_ptr = cur_table_ptr;
         cur_table_ptr = cur_table->up;
         level_id++;
     }
 
     // 3. Write KV 
+    // log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
     if(free_slot_ptr != -1){
         // 3.1 check rehash
         if(dir->is_resizing == 1 && level_id == 0){
@@ -262,6 +269,7 @@ Retry:
         tmp->len = (kvblock_len + ALIGNED_SIZE - 1) / ALIGNED_SIZE;
         tmp->offset = ralloc.offset(kvblock_ptr);
         if(!co_await conn->cas_n(free_slot_ptr, seg_rmr.rkey,0,*tmp)){
+            log_err("[%lu:%lu:%lu] cas entry fail at slot_ptr:%lx",this->cli_id,this->coro_id,this->key_num,free_slot_ptr);
             goto Retry;
         }
         // 3.3 recheck global context
@@ -271,18 +279,51 @@ Retry:
         }
         co_return;
     }
+
+    // 4. Recheck Global Context
+    Directory* tmp_dir = (Directory*)alloc.alloc(sizeof(Directory));
+    co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, tmp_dir, sizeof(Directory), lmr->lkey);
+    tmp_dir->print();
+    if(dir->first_level != tmp_dir->first_level){
+        goto Retry;
+    }
+
+    // 5. Resize
+    log_err("[%lu:%lu:%lu]expand",this->cli_id,this->coro_id,this->key_num);
+    // 5.1 alloc new level
+    uintptr_t new_level_ptr = dir->first_level + sizeof(LevelTable) + cur_table->capacity * sizeof(Bucket);
+    cur_table->capacity = cur_table->capacity * 2;
+    cur_table->up = 0 ;
+    co_await conn->write(new_level_ptr,seg_rmr.rkey,cur_table,sizeof(LevelTable),lmr->lkey);
     
-    // 4. Resize
-    // 4.1 Expand Global Context
-    uintptr_t new_level_ptr = dir->first_level + sizeof(LevelTable) + first_level_capacity * sizeof(Bucket);
+    // 5.2 clear new level table
+    LevelTable* zero_table = (LevelTable*)alloc.alloc(sizeof(LevelTable)+sizeof(Bucket)*zero_size);
+    memset(zero_table->buckets,0,sizeof(Bucket)*zero_size);
+    uint64_t upper = cur_table->capacity / zero_size ;
+    for(uint64_t i = 0 ; i < upper ; i++){
+        log_err("[%lu:%lu:%lu]i:%lu upper:%lu cur_table->capacity:%lu zero_size:%lu",this->cli_id,this->coro_id,this->key_num,i,upper,cur_table->capacity,zero_size);
+        co_await conn->write(new_level_ptr+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),seg_rmr.rkey,cur_table->buckets,sizeof(Bucket)*zero_size,lmr->lkey);
+    }
+
+    log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
+    // 5.2 list new level to first level
+    cur_table->up = new_level_ptr;
+    co_await conn->write(first_level_ptr,seg_rmr.rkey,&cur_table->up,sizeof(uint64_t),lmr->lkey);
+    
+    // 5.3 Expand Global Context
+    // log_err("[%lu:%lu:%lu]dir->first_level:%lx new_level_ptr:%lx cur_table_ptr:%lx cas_ptr:%lx",this->cli_id,this->coro_id,this->key_num,dir->first_level,new_level_ptr,cur_table_ptr,seg_rmr.raddr + sizeof(uint64_t));
     if(!co_await conn->cas_n(seg_rmr.raddr + sizeof(uint64_t), seg_rmr.rkey,dir->first_level,new_level_ptr)){
         goto Retry;
     }
     dir->is_resizing = 1;
     co_await conn->write(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(uint64_t),lmr->lkey);
+    // log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
 
-    // 4.2 ReHash
+    // 6. ReHash
     // Complete By Rehash Thread
+
+    // 7. ReInsert
+    goto Retry;
 }
 
 task<> Client::rehash(){
@@ -357,6 +398,9 @@ Retry:
                 buc_ptr += zero_size * sizeof(Bucket);
             }
 
+            // 3. write is_resizing to false
+            dir->is_resizing = 0;
+            co_await conn->write(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(uint64_t),lmr->lkey);
         }
     }
 }

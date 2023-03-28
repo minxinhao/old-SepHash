@@ -13,14 +13,15 @@
 #include "split_op2c.h"
 #include "rdma_bench.h"
 #include "cluster_hash.h"
+#include "clevel.h"
 #include <set>
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
-uint64_t load_num = 10000000;
-using ClientType = CLUSTER::Client;
-using ServerType = CLUSTER::Server;
-using Slice = CLUSTER::Slice;
+uint64_t load_num = 1000000;
+using ClientType = CLEVEL::Client;
+using ServerType = CLEVEL::Server;
+using Slice = CLEVEL::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {

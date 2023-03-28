@@ -101,7 +101,7 @@ struct Directory
     // 为多客户端同步保留的字段，不影响原有空间布局
     uint64_t start_cnt;
     void print(){
-       
+       log_err("is_resizing:%lu first_level:%lx last_level:%lx",is_resizing,first_level,last_level);
     }
 } __attribute__((aligned(1)));
 
