@@ -18,7 +18,7 @@
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
-uint64_t load_num = 1000000;
+uint64_t load_num = 10000000;
 using ClientType = CLEVEL::Client;
 using ServerType = CLEVEL::Server;
 using Slice = CLEVEL::Slice;
