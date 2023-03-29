@@ -118,21 +118,24 @@ task<> Client::reset_remote()
     dir->last_level = (uintptr_t)server_alloc.alloc(sizeof(LevelTable)+sizeof(Bucket)*INIT_TABLE_SIZE);
     dir->first_level = (uintptr_t)server_alloc.alloc(sizeof(LevelTable)+sizeof(Bucket)*INIT_TABLE_SIZE*2);
 
-    LevelTable* cur_table = (LevelTable*)alloc.alloc(sizeof(LevelTable)+sizeof(Bucket)*zero_size);
-    memset(cur_table->buckets,0,sizeof(Bucket)*zero_size);
+    LevelTable* cur_table = (LevelTable*)alloc.alloc(sizeof(LevelTable));
+    Bucket* buc = (Bucket*)alloc.alloc(sizeof(Bucket)*zero_size);  // 不知道为啥这里0长数组失效了，只能手动分配空间
+    memset(buc,0,sizeof(Bucket)*zero_size);
     cur_table->up = dir->first_level;
     cur_table->capacity = INIT_TABLE_SIZE;
     uint64_t upper = INIT_TABLE_SIZE / zero_size ;
     for(uint64_t i = 0 ; i < upper ; i++){
-        co_await conn->write(dir->last_level+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),seg_rmr.rkey,cur_table->buckets,sizeof(Bucket)*zero_size,lmr->lkey);
+        co_await conn->write(dir->last_level+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),seg_rmr.rkey,buc,sizeof(Bucket)*zero_size,lmr->lkey);
     }
+    co_await conn->write(dir->last_level,seg_rmr.rkey,cur_table,sizeof(LevelTable),lmr->lkey);
     
     cur_table->up = 0;
     cur_table->capacity = INIT_TABLE_SIZE*2;
     upper = cur_table->capacity / zero_size ;
     for(uint64_t i = 0 ; i < upper ; i++){
-        co_await conn->write(dir->first_level+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),seg_rmr.rkey,cur_table->buckets,sizeof(Bucket)*zero_size,lmr->lkey);
+        co_await conn->write(dir->first_level+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),seg_rmr.rkey,buc,sizeof(Bucket)*zero_size,lmr->lkey);
     }
+    co_await conn->write(dir->first_level,seg_rmr.rkey,cur_table,sizeof(LevelTable),lmr->lkey);
 
     // 重置远端 Directory
     co_await conn->write(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
@@ -230,29 +233,23 @@ Retry:
             buc_ptr = (i==0)? buc_ptr1:buc_ptr2;
             for(uint64_t entry_id = 0 ; entry_id < BUCKET_SIZE ; entry_id++){
                 uint64_t buc_id = (i==0)? buc_idx1:buc_idx2;
-                if(this->key_num == 1302403){
-                    log_err("[%lu:%lu:%lu]pattern_1:%lx pattern_2:%lx level_id:%lu buc_id:%lu entry_id:%lu cur_table_ptr:%lx",this->cli_id,this->coro_id,this->key_num,pattern_1,pattern_2,level_id,buc_id,entry_id,cur_table_ptr);
-                    buc->entrys[entry_id].print();
-                }
 
                 if(buc->entrys[entry_id] == 0)
                 {
                     free_slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
                     continue;
                 }
-                // if(buc->entrys[entry_id].fp == tmp_fp)
-                // {
-                //     if(this->key_num == 1302403) log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
-                //     co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, tmp_block,(buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
-                //     if(this->key_num == 1302403) tmp_block->print();
-                //     if (memcmp(key->data, tmp_block->data, key->len) == 0)
-                //     {
-                //         // duplicate key : delete
-                //         log_err("[%lu:%lu:%lu]duplicate",this->cli_id,this->coro_id,this->key_num);
-                //         uintptr_t slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
-                //         co_await conn->cas_n(slot_ptr, seg_rmr.rkey,buc->entrys[entry_id], 0);
-                //     }
-                // }
+                if(buc->entrys[entry_id].fp == tmp_fp)
+                {
+                    co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, tmp_block,(buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
+                    if (memcmp(key->data, tmp_block->data, key->len) == 0)
+                    {
+                        // duplicate key : delete
+                        log_err("[%lu:%lu:%lu]duplicate",this->cli_id,this->coro_id,this->key_num);
+                        uintptr_t slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
+                        co_await conn->cas_n(slot_ptr, seg_rmr.rkey,buc->entrys[entry_id], 0);
+                    }
+                }
             }
         }
         first_level_ptr = cur_table_ptr;
@@ -305,7 +302,7 @@ Retry:
     memset(zero_table,0,sizeof(Bucket)*zero_size);
     uint64_t upper = cur_table->capacity / zero_size ;
     for(uint64_t i = 0 ; i < upper ; i++){
-        log_err("[%lu:%lu:%lu]i:%lu upper:%lu ptr:%lx cur_table->capacity:%lu zero_size:%lu",this->cli_id,this->coro_id,this->key_num,i,upper,new_level_ptr+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),cur_table->capacity,zero_size);
+        // log_err("[%lu:%lu:%lu]i:%lu upper:%lu ptr:%lx cur_table->capacity:%lu zero_size:%lu",this->cli_id,this->coro_id,this->key_num,i,upper,new_level_ptr+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),cur_table->capacity,zero_size);
         co_await conn->write(new_level_ptr+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),seg_rmr.rkey,zero_table,sizeof(Bucket)*zero_size,lmr->lkey);
     }
 
