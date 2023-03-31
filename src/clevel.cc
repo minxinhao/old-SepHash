@@ -299,6 +299,10 @@ Retry:
 
     // 5. Resize
     log_err("[%lu:%lu:%lu]expand",this->cli_id,this->coro_id,this->key_num);
+    // 5.1 GetLock
+    if(!co_await conn->cas_n(lock_rmr.raddr, lock_rmr.rkey, 0, 1)){
+        goto Retry;
+    }
     // 5.1 alloc new level
     uintptr_t new_level_ptr = dir->first_level + sizeof(LevelTable) + cur_table->capacity * sizeof(Bucket);
     cur_table->capacity = cur_table->capacity * 2;
@@ -327,6 +331,9 @@ Retry:
     dir->is_resizing = 1;
     co_await conn->write(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(uint64_t),lmr->lkey);
     // log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
+    
+    // 5.4 Unlock 
+    co_await conn->cas_n(lock_rmr.raddr, lock_rmr.rkey, 1, 0);
 
     // 6. ReHash
     // Complete By Rehash Thread
@@ -413,7 +420,11 @@ Retry:
                         }
                         
                         // 2.4 no free slot in first level
-                        // a. expand 
+                        // a. lock dir
+                        if(!co_await conn->cas_n(lock_rmr.raddr, lock_rmr.rkey, 0, 1)){
+                            goto Retry;
+                        }
+                        // b. expand 
                         uintptr_t new_level_ptr = dir->first_level + sizeof(LevelTable) + first_table->capacity * sizeof(Bucket);
                         uint64_t upper = (first_table->capacity * 2) / zero_size ;
                         for(uint64_t i = 0 ; i < upper ; i++){
@@ -427,7 +438,11 @@ Retry:
                         co_await conn->write(dir->first_level,seg_rmr.rkey,&(first_table->up),sizeof(uint64_t),lmr->lkey);
 
                         co_await conn->cas_n(seg_rmr.raddr + sizeof(uint64_t), seg_rmr.rkey,dir->first_level,new_level_ptr);
-                        // b. retry insert
+                        
+                        // c. unlock
+                        co_await conn->cas_n(lock_rmr.raddr, lock_rmr.rkey, 1, 0);
+                        
+                        // d. retry insert
                         log_err("Move buc:%lu entry:%lu expand retry",buc_id,entry_id);
                         goto Retry;
 
@@ -446,7 +461,7 @@ Retry:
             }else{
                 log_err("Continue resize for next last_table:%lx",last_table->up);
             }
-
+        }else{
             // 4. Check Exit
             co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(Directory),lmr->lkey);
             if(dir->start_cnt==0){
