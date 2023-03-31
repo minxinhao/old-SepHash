@@ -186,7 +186,7 @@ task<> Client::insert(Slice *key, Slice *value)
     KVBlock *tmp_block = (KVBlock *)alloc.alloc(8 * ALIGNED_SIZE);
 Retry:
     retry_cnt++;
-    if(retry_cnt >= 3) exit(-1);
+    if(retry_cnt >= 10) exit(-1);
     alloc.ReSet(sizeof(Directory) + kvblock_len + 8 * ALIGNED_SIZE);
 
     // log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
@@ -204,6 +204,9 @@ Retry:
     Bucket * buc2 = (Bucket*)alloc.alloc(sizeof(Bucket));
     uint64_t level_id = 0;
     uintptr_t free_slot_ptr = -1;
+    uintptr_t free_level_id = -1;
+    uintptr_t free_buc_id = -1;
+    uintptr_t free_entry_id = -1;
     uint64_t first_level_ptr = -1;
 
     while(cur_table_ptr != 0){
@@ -237,6 +240,9 @@ Retry:
                 if(buc->entrys[entry_id] == 0)
                 {
                     free_slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
+                    free_level_id = level_id;
+                    free_buc_id = (i==0)? buc_idx1:buc_idx2;
+                    free_entry_id = entry_id;
                     continue;
                 }
                 if(buc->entrys[entry_id].fp == tmp_fp)
@@ -261,7 +267,7 @@ Retry:
     // log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
     if(free_slot_ptr != -1){
         // 3.1 check rehash
-        if(dir->is_resizing == 1 && level_id == 0){
+        if(dir->is_resizing == 1 && free_level_id == 0){
             goto Retry;
         }
         // 3.2 cas entry
@@ -270,12 +276,14 @@ Retry:
         tmp->len = (kvblock_len + ALIGNED_SIZE - 1) / ALIGNED_SIZE;
         tmp->offset = ralloc.offset(kvblock_ptr);
         if(!co_await conn->cas_n(free_slot_ptr, seg_rmr.rkey,0,*tmp)){
-            log_err("[%lu:%lu:%lu] cas entry fail at slot_ptr:%lx",this->cli_id,this->coro_id,this->key_num,free_slot_ptr);
+            // log_err("[%lu:%lu:%lu] cas entry fail at slot_ptr:%lx",this->cli_id,this->coro_id,this->key_num,free_slot_ptr);
             goto Retry;
         }
+        // log_err("[%lu:%lu:%lu]write at level:%lu buc_id:%lu entry:%lu",this->cli_id,this->coro_id,this->key_num,free_level_id,free_buc_id,free_entry_id);
+
         // 3.3 recheck global context
         co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
-        if(dir->is_resizing == 1 && level_id == 0){
+        if(dir->is_resizing == 1 && free_level_id == 0){
             goto Retry;
         }
         co_return;
@@ -284,7 +292,7 @@ Retry:
     // 4. Recheck Global Context
     Directory* tmp_dir = (Directory*)alloc.alloc(sizeof(Directory));
     co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, tmp_dir, sizeof(Directory), lmr->lkey);
-    tmp_dir->print();
+    // tmp_dir->print();
     if(dir->first_level != tmp_dir->first_level){
         goto Retry;
     }
@@ -328,36 +336,46 @@ Retry:
 }
 
 task<> Client::rehash(){
-    Bucket* buc = (Bucket*)alloc.alloc(zero_size*sizeof(Bucket));
     LevelTable * last_table = (LevelTable*)alloc.alloc(sizeof(LevelTable));
     LevelTable * first_table = (LevelTable*)alloc.alloc(sizeof(LevelTable));
     Bucket* buc1 = (Bucket*)alloc.alloc(sizeof(Bucket));
     Bucket* buc2 = (Bucket*)alloc.alloc(sizeof(Bucket));
     KVBlock *kv_block = (KVBlock *)alloc.alloc(7 * ALIGNED_SIZE);
+    Bucket* buc = (Bucket*)alloc.alloc(zero_size*sizeof(Bucket));
+    Bucket* zero_table = (Bucket*)alloc.alloc(zero_size*sizeof(Bucket));
+    memset(zero_table,0,sizeof(Bucket)*zero_size);
+    log_err("[%lu:%lu:%lu]rehash",this->cli_id,this->coro_id,this->key_num);
     while(true){
-        co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(uint64_t),lmr->lkey);
+        co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(Directory),lmr->lkey);
         if(dir->is_resizing){
+            log_err("[%lu:%lu:%lu]Detect resize with dir->first_level:%lx dir->last_level:%lx",this->cli_id,this->coro_id,this->key_num,dir->first_level,dir->last_level);
             // 1. read last level header
             co_await conn->read(dir->last_level,seg_rmr.rkey,last_table,sizeof(LevelTable),lmr->lkey);
-                        
+
             // 2. read last level buckets
             uint64_t upper = last_table->capacity / zero_size ;
             uint64_t buc_id = 0; //记录update的位置
             uintptr_t buc_ptr = dir->last_level + sizeof(LevelTable);
+            // log_err("Upper :%lu last_table->capacity:%lu up:%lx zero_size:%lu buc_ptr:%lx",upper,last_table->capacity,last_table->up,zero_size,buc_ptr);
             for(uint64_t i = 0 ; i < upper ; i++){
                 co_await conn->read(buc_ptr,seg_rmr.rkey,buc,sizeof(Bucket)*zero_size,lmr->lkey);
                 for(uint64_t buc_id = 0 ; buc_id < zero_size ; buc_id++){
                     for(uint64_t entry_id = 0 ; entry_id < BUCKET_SIZE ; entry_id++){
                         // 2.1 Read KvBlock
+                        // log_err("Move buc:%lu entry:%lu",buc_id,entry_id);
+                        // buc[buc_id].entrys[entry_id].print("Move");
+                        if(buc[buc_id].entrys[entry_id].offset == 0) continue;
+                        if(buc[buc_id].entrys[entry_id].len > 1) exit(-1);
                         co_await conn->read(ralloc.ptr(buc[buc_id].entrys[entry_id].offset), seg_rmr.rkey, kv_block,(buc[buc_id].entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
+                        // kv_block->print("Move");
                         auto pattern = hash(kv_block->data, kv_block->k_len);
                         uint64_t pattern_1 = (uint64_t)pattern;
                         uint64_t pattern_2 = (uint64_t)(pattern >> 64);
 Retry:
                         // 2.2 Read First level header
-                        co_await conn->read(seg_rmr.raddr+sizeof(uint64_t),seg_rmr.rkey,&dir->first_level,sizeof(uint64_t),lmr->lkey);
+                        co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(Directory),lmr->lkey);
                         co_await conn->read(dir->first_level,seg_rmr.rkey,first_table,sizeof(LevelTable),lmr->lkey);
-
+                        // log_err("Fisrt_level:%lx first_table->capacity:%lu",dir->first_level,first_table->capacity);
                         // 2.3 read 2 bucket in first level && insert
                         uint64_t buc_idx1 = pattern_1 % first_table->capacity;
                         uint64_t buc_idx2 = pattern_2 % first_table->capacity;
@@ -366,23 +384,30 @@ Retry:
                         auto read_buc1 = conn->read(buc_ptr1,seg_rmr.rkey,buc1,sizeof(Bucket),lmr->lkey);
                         auto read_buc2 = wo_wait_conn->read(buc_ptr2,seg_rmr.rkey,buc2,sizeof(Bucket),lmr->lkey);
                         uintptr_t free_slot_ptr = -1;
+                        uintptr_t free_buc_id = -1;
+                        uintptr_t free_entry_id = -1;
                         co_await std::move(read_buc1);
                         co_await std::move(read_buc2);
                         for(uint64_t i = 0 ; i < 2 ; i++){
-                            buc = (i==0)? buc1:buc2;
-                            buc_ptr = (i==0)? buc_ptr1:buc_ptr2;
+                            Bucket* choice_buc = (i==0)? buc1:buc2;
+                            uintptr_t  choice_buc_ptr = (i==0)? buc_ptr1:buc_ptr2;
                             for(uint64_t entry_id = 0 ; entry_id < BUCKET_SIZE ; entry_id++){
-                                if(buc->entrys[entry_id].offset == 0){
-                                    free_slot_ptr = buc_ptr1 + sizeof(Entry) * entry_id;
+                                if(choice_buc->entrys[entry_id].offset == 0){
+                                    free_buc_id = (i==0)? buc_idx1:buc_idx2;
+                                    free_entry_id = entry_id;
+                                    free_slot_ptr = choice_buc_ptr + sizeof(Entry) * entry_id;
                                     break;
                                 }
                             }
+                            if(free_slot_ptr!=-1) break;
                         }
 
                         if(free_slot_ptr != -1){
                             if(!co_await conn->cas_n(free_slot_ptr, seg_rmr.rkey,0,buc[buc_id].entrys[entry_id])){
+                                log_err("Move buc:%lu entry:%lu cas fail retry",i*zero_size + buc_id,entry_id);
                                 goto Retry;
                             }else{
+                                // log_err("Move buc:%lu entry:%lu to free_buc_id:%lu free_entry_id:%lu free_slot_ptr:%lx",i*zero_size+buc_id,entry_id,free_buc_id,free_entry_id,free_slot_ptr);
                                 continue;
                             }
                         }
@@ -390,8 +415,20 @@ Retry:
                         // 2.4 no free slot in first level
                         // a. expand 
                         uintptr_t new_level_ptr = dir->first_level + sizeof(LevelTable) + first_table->capacity * sizeof(Bucket);
+                        uint64_t upper = (first_table->capacity * 2) / zero_size ;
+                        for(uint64_t i = 0 ; i < upper ; i++){
+                            co_await conn->write(new_level_ptr+sizeof(LevelTable)+i*zero_size*sizeof(Bucket),seg_rmr.rkey,zero_table,sizeof(Bucket)*zero_size,lmr->lkey);
+                        }
+                        first_table->up = 0;
+                        first_table->capacity = first_table->capacity * 2;
+                        co_await conn->write(new_level_ptr,seg_rmr.rkey,first_table,sizeof(LevelTable),lmr->lkey);
+
+                        first_table->up = new_level_ptr ;
+                        co_await conn->write(dir->first_level,seg_rmr.rkey,&(first_table->up),sizeof(uint64_t),lmr->lkey);
+
                         co_await conn->cas_n(seg_rmr.raddr + sizeof(uint64_t), seg_rmr.rkey,dir->first_level,new_level_ptr);
                         // b. retry insert
+                        log_err("Move buc:%lu entry:%lu expand retry",buc_id,entry_id);
                         goto Retry;
 
                     }
@@ -400,8 +437,21 @@ Retry:
             }
 
             // 3. write is_resizing to false
-            dir->is_resizing = 0;
-            co_await conn->write(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(uint64_t),lmr->lkey);
+            log_err("End resize for last_table:%lx last_table",dir->last_level);
+            dir->print();
+            co_await conn->write(seg_rmr.raddr+2*sizeof(uint64_t),seg_rmr.rkey,&(last_table->up),sizeof(uint64_t),lmr->lkey);
+            if((first_table->capacity / last_table->capacity) == 4){
+                dir->is_resizing = 0;
+                co_await conn->write(seg_rmr.raddr,seg_rmr.rkey,&(dir->is_resizing),sizeof(uint64_t),lmr->lkey);
+            }else{
+                log_err("Continue resize for next last_table:%lx",last_table->up);
+            }
+
+            // 4. Check Exit
+            co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(Directory),lmr->lkey);
+            if(dir->start_cnt==0){
+                co_return;
+            }
         }
     }
 }
@@ -449,9 +499,7 @@ Retry:
             }else{
                 co_await std::move(read_buc2);
             }
-
             buc = (i==0)? buc1:buc2;
-            buc_ptr = (i==0)? buc_ptr1:buc_ptr2;
             for(uint64_t entry_id = 0 ; entry_id < BUCKET_SIZE ; entry_id++){
                 if(buc->entrys[entry_id].fp == tmp_fp){
                     co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, kv_block,(buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
@@ -468,7 +516,7 @@ Retry:
     // 3. recheck global context
     Directory * tmp_dir = (Directory*)alloc.alloc(sizeof(Directory));
     co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, tmp_dir, sizeof(Directory), lmr->lkey);
-    if(tmp_dir->first_level != dir->first_level ){
+    if(tmp_dir->first_level != dir->first_level || tmp_dir->last_level != dir->last_level){
         goto Retry;
     }
 

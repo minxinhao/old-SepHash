@@ -160,12 +160,12 @@ int main(int argc, char *argv[])
     else
     {
         uint64_t cbuf_size = (1ul << 20) * 100;
-        char *mem_buf = (char *)malloc(cbuf_size * config.num_cli * config.num_coro);
+        char *mem_buf = (char *)malloc(cbuf_size * (config.num_cli * config.num_coro + 1));
         rdma_dev dev("mlx5_0", 1, config.roce_flag);
-        std::vector<ibv_mr *> lmrs(config.num_cli * config.num_coro, nullptr);
-        std::vector<rdma_client *> rdma_clis(config.num_cli, nullptr);
-        std::vector<rdma_conn *> rdma_conns(config.num_cli, nullptr);
-        std::vector<rdma_conn *> rdma_wowait_conns(config.num_cli, nullptr);
+        std::vector<ibv_mr *> lmrs(config.num_cli * config.num_coro + 1, nullptr);
+        std::vector<rdma_client *> rdma_clis(config.num_cli + 1, nullptr);
+        std::vector<rdma_conn *> rdma_conns(config.num_cli + 1, nullptr);
+        std::vector<rdma_conn *> rdma_wowait_conns(config.num_cli + 1, nullptr);
         RACE_SHARE_DIR::Directory* dir = (RACE_SHARE_DIR::Directory*)malloc(sizeof(RACE_SHARE_DIR::Directory));
         ibv_mr* dir_mr = dev.create_mr(sizeof(RACE_SHARE_DIR::Directory),dir);
         std::mutex dir_lock;
@@ -196,6 +196,22 @@ int main(int argc, char *argv[])
             }
         }
 
+        // For Rehash Thread
+        if(config.machine_id==0 && typeid(ClientType) == typeid(CLEVEL::Client)){
+            rdma_clis[config.num_cli] = new rdma_client(dev, so_qp_cap, rdma_default_tempmp_size, config.max_coro, config.cq_size);
+            rdma_conns[config.num_cli] = rdma_clis[config.num_cli]->connect(config.server_ip);
+            rdma_wowait_conns[config.num_cli] = rdma_clis[config.num_cli]->connect(config.server_ip);
+
+            lmrs[config.num_cli * config.num_coro] =
+                    dev.create_mr(cbuf_size, mem_buf + cbuf_size * (config.num_cli * config.num_coro));
+            CLEVEL::Client* rehash_cli = new CLEVEL::Client(config, lmrs[config.num_cli * config.num_coro], rdma_clis[config.num_cli], rdma_conns[config.num_cli],rdma_wowait_conns[config.num_cli],config.machine_id, config.num_cli, config.num_coro);
+            auto th = [&](rdma_client *rdma_cli) {
+                rdma_cli->run(rehash_cli->rehash());
+            };
+            ths[config.num_cli] = std::thread(th,rdma_clis[config.num_cli]);
+        }
+        
+
         printf("Load start\n");
         auto start = std::chrono::steady_clock::now();
         for (uint64_t i = 0; i < config.num_cli; i++)
@@ -220,6 +236,8 @@ int main(int argc, char *argv[])
         printf("Load duration:%.2lfms\n", duration);
         printf("Load IOPS:%.2lfKops\n", op_cnt / duration);
         fflush(stdout);
+        // ths[config.num_cli].join();
+
         printf("Run start\n");
         auto op_per_coro = config.num_op / (config.num_machine * config.num_cli * config.num_coro);
         std::vector<Generator *> gens;
@@ -266,7 +284,8 @@ int main(int argc, char *argv[])
         printf("Run duration:%.2lfms\n", duration);
         printf("Run IOPS:%.2lfKops\n", op_cnt / duration);
         fflush(stdout);
-        
+
+        ths[config.num_cli].join();
         for (auto gen : gens)
         {
             delete gen;

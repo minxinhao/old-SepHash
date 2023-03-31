@@ -50,8 +50,9 @@ struct KVBlock
     uint64_t k_len;
     uint64_t v_len;
     char data[0];
-    void print(){
-        log_err("klen:%lu key:%lu vlen:%lu value:%s",k_len,*(uint64_t*)data,v_len,data+sizeof(uint64_t));
+    void print(const char* desc = nullptr){
+        if(desc!=nullptr) log_err("%s klen:%lu key:%lu vlen:%lu value:%s",desc,k_len,*(uint64_t*)data,v_len,data+sizeof(uint64_t));
+        else log_err("klen:%lu key:%lu vlen:%lu value:%s",k_len,*(uint64_t*)data,v_len,data+sizeof(uint64_t));
     }
 } __attribute__((aligned(1)));
 
@@ -76,8 +77,9 @@ struct Entry
     {
         return *(uint64_t *)this;
     }
-    void print(){
-        log_err("len:%d fp:%x offset:%lx",len,fp,offset);
+    void print(const char* desc = nullptr){
+        if(desc!=nullptr) log_err("%s len:%d fp:%x offset:%lx",desc,len,fp,offset);
+        else log_err("len:%d fp:%x offset:%lx",len,fp,offset);
     }
 } __attribute__((aligned(1)));
 
@@ -100,11 +102,13 @@ struct Directory
     uint64_t is_resizing;    
     uintptr_t first_level;
     uintptr_t last_level;
+    // uint64_t dir_lock; //因为使用了静态的空间分配，这里还是需要使用一个DirLock,实际测试中对性能影响很小；
 
     // 为多客户端同步保留的字段，不影响原有空间布局
     uint64_t start_cnt;
-    void print(){
-       log_err("is_resizing:%lu first_level:%lx last_level:%lx",is_resizing,first_level,last_level);
+    void print(const char* desc = nullptr){
+       if(desc!=nullptr) log_err("%s is_resizing:%lu first_level:%lx last_level:%lx",desc,is_resizing,first_level,last_level);
+       else log_err("is_resizing:%lu first_level:%lx last_level:%lx",is_resizing,first_level,last_level);
     }
 } __attribute__((aligned(1)));
 
@@ -128,9 +132,9 @@ public:
     task<> update(Slice *key, Slice *value);
     task<> remove(Slice *key);
 
-private:
     // 用来在Resize的时候Move数据
     task<> rehash();
+private:
 
     // rdma structs
     rdma_client *cli;
