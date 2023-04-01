@@ -186,7 +186,10 @@ task<> Client::insert(Slice *key, Slice *value)
     KVBlock *tmp_block = (KVBlock *)alloc.alloc(8 * ALIGNED_SIZE);
 Retry:
     retry_cnt++;
-    if(retry_cnt >= 10) exit(-1);
+    if(retry_cnt >= 10000){
+        log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
+        exit(-1);
+    }
     alloc.ReSet(sizeof(Directory) + kvblock_len + 8 * ALIGNED_SIZE);
 
     // log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
@@ -268,6 +271,10 @@ Retry:
     if(free_slot_ptr != -1){
         // 3.1 check rehash
         if(dir->is_resizing == 1 && free_level_id == 0){
+            if(retry_cnt >= (10000-5)){
+                log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
+                // exit(-1);
+            }
             goto Retry;
         }
         // 3.2 cas entry
@@ -277,6 +284,10 @@ Retry:
         tmp->offset = ralloc.offset(kvblock_ptr);
         if(!co_await conn->cas_n(free_slot_ptr, seg_rmr.rkey,0,*tmp)){
             // log_err("[%lu:%lu:%lu] cas entry fail at slot_ptr:%lx",this->cli_id,this->coro_id,this->key_num,free_slot_ptr);
+            if(retry_cnt >= (10000-5)){
+                log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
+                // exit(-1);
+            }
             goto Retry;
         }
         // log_err("[%lu:%lu:%lu]write at level:%lu buc_id:%lu entry:%lu",this->cli_id,this->coro_id,this->key_num,free_level_id,free_buc_id,free_entry_id);
@@ -284,6 +295,10 @@ Retry:
         // 3.3 recheck global context
         co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
         if(dir->is_resizing == 1 && free_level_id == 0){
+            if(retry_cnt >= (10000-5)){
+                log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
+                // exit(-1);
+            }
             goto Retry;
         }
         co_return;
@@ -294,15 +309,23 @@ Retry:
     co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, tmp_dir, sizeof(Directory), lmr->lkey);
     // tmp_dir->print();
     if(dir->first_level != tmp_dir->first_level){
+        if(retry_cnt >= (10000-5)){
+                log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
+                // exit(-1);
+            }
         goto Retry;
     }
 
     // 5. Resize
-    log_err("[%lu:%lu:%lu]expand",this->cli_id,this->coro_id,this->key_num);
     // 5.1 GetLock
     if(!co_await conn->cas_n(lock_rmr.raddr, lock_rmr.rkey, 0, 1)){
+        if(retry_cnt >= (10000-5)){
+            log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
+            // exit(-1);
+        }
         goto Retry;
     }
+    log_err("[%lu:%lu:%lu]expand",this->cli_id,this->coro_id,this->key_num);
     // 5.1 alloc new level
     uintptr_t new_level_ptr = dir->first_level + sizeof(LevelTable) + cur_table->capacity * sizeof(Bucket);
     cur_table->capacity = cur_table->capacity * 2;
@@ -326,19 +349,25 @@ Retry:
     // 5.3 Expand Global Context
     // log_err("[%lu:%lu:%lu]dir->first_level:%lx new_level_ptr:%lx cur_table_ptr:%lx cas_ptr:%lx",this->cli_id,this->coro_id,this->key_num,dir->first_level,new_level_ptr,cur_table_ptr,seg_rmr.raddr + sizeof(uint64_t));
     if(!co_await conn->cas_n(seg_rmr.raddr + sizeof(uint64_t), seg_rmr.rkey,dir->first_level,new_level_ptr)){
+        log_err("[%lu:%lu:%lu] fail to update first level",this->cli_id,this->coro_id,this->key_num);
         goto Retry;
     }
     dir->is_resizing = 1;
     co_await conn->write(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(uint64_t),lmr->lkey);
-    // log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
+    log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
     
     // 5.4 Unlock 
     co_await conn->cas_n(lock_rmr.raddr, lock_rmr.rkey, 1, 0);
+    log_err("[%lu:%lu:%lu]",this->cli_id,this->coro_id,this->key_num);
 
     // 6. ReHash
     // Complete By Rehash Thread
 
     // 7. ReInsert
+    if(retry_cnt >= (10000-5)){
+        log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
+        // exit(-1);
+    }
     goto Retry;
 }
 
@@ -352,8 +381,10 @@ task<> Client::rehash(){
     Bucket* zero_table = (Bucket*)alloc.alloc(zero_size*sizeof(Bucket));
     memset(zero_table,0,sizeof(Bucket)*zero_size);
     log_err("[%lu:%lu:%lu]rehash",this->cli_id,this->coro_id,this->key_num);
+    bool resize_flag = false;
     while(true){
         co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(Directory),lmr->lkey);
+        // log_err("[%lu:%lu:%lu]read dir",this->cli_id,this->coro_id,this->key_num);
         if(dir->is_resizing){
             log_err("[%lu:%lu:%lu]Detect resize with dir->first_level:%lx dir->last_level:%lx",this->cli_id,this->coro_id,this->key_num,dir->first_level,dir->last_level);
             // 1. read last level header
@@ -372,7 +403,11 @@ task<> Client::rehash(){
                         // log_err("Move buc:%lu entry:%lu",buc_id,entry_id);
                         // buc[buc_id].entrys[entry_id].print("Move");
                         if(buc[buc_id].entrys[entry_id].offset == 0) continue;
-                        if(buc[buc_id].entrys[entry_id].len > 1) exit(-1);
+                        if(buc[buc_id].entrys[entry_id].len > 1){
+                            log_err("Incorrect len in buc_id:%lu entry_id:%lu",buc_id+i*zero_size,entry_id);
+                            buc[buc_id].entrys[entry_id].print();
+                            exit(-1);
+                        }
                         co_await conn->read(ralloc.ptr(buc[buc_id].entrys[entry_id].offset), seg_rmr.rkey, kv_block,(buc[buc_id].entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
                         // kv_block->print("Move");
                         auto pattern = hash(kv_block->data, kv_block->k_len);
@@ -453,6 +488,7 @@ Retry:
 
             // 3. write is_resizing to false
             log_err("End resize for last_table:%lx last_table",dir->last_level);
+            resize_flag = true;
             dir->print();
             co_await conn->write(seg_rmr.raddr+2*sizeof(uint64_t),seg_rmr.rkey,&(last_table->up),sizeof(uint64_t),lmr->lkey);
             if((first_table->capacity / last_table->capacity) == 4){
@@ -464,7 +500,8 @@ Retry:
         }else{
             // 4. Check Exit
             co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(Directory),lmr->lkey);
-            if(dir->start_cnt==0){
+            if(dir->start_cnt==0 && resize_flag ){
+                log_err("[%lu:%lu:%lu] rehash exit",this->cli_id,this->coro_id,this->key_num);
                 co_return;
             }
         }
