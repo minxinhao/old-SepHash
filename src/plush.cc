@@ -367,7 +367,7 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
     Bucket *buc = (Bucket *)alloc.alloc(sizeof(Bucket));
     for (uint64_t fanout_id = 0; fanout_id < fanout; fanout_id++)
     {
-        log_err("migrate fanout:%lu with size:%lu",fanout_id,sizes[fanout_id]);
+        // log_err("migrate fanout:%lu with size:%lu",fanout_id,sizes[fanout_id]);
         if (sizes[fanout_id] == 0)
         {
             continue;
@@ -400,7 +400,6 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
 
             while (free_buc_idx < bucket_per_group && elems_inserted < sizes[fanout_id])
             {
-                log_err("write");
                 // a. check bucket ptr
                 uintptr_t buc_ptr = buc_start_ptr + (group_id * bucket_per_group + free_buc_idx) * sizeof(Bucket);
                 if (inner_group->bucket_pointers[free_buc_idx].buc_ptr == 0)
@@ -418,10 +417,10 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
                 {
                     for (uint64_t entry_id = 0; entry_id < elems_to_insert; entry_id++)
                     {
-                        if(keys[fanout_id * entry_per_group + elems_inserted + entry_id] == 12093){
-                            log_err("migrate keys[%lu]:%lu to level:%lu group:%lu free_buc_idx:%lu entry:%lu buc_ptr:%lx",fanout_id*entry_per_group +entry_id +elems_inserted,keys[fanout_id*entry_per_group+elems_inserted+entry_id],next_level,group_id,free_buc_idx,bucket_size+entry_id,buc_ptr);    
-                            new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id].print();
-                        }
+                        // if(keys[fanout_id * entry_per_group + elems_inserted + entry_id] == 12093){
+                        //     log_err("migrate keys[%lu]:%lu to level:%lu group:%lu free_buc_idx:%lu entry:%lu buc_ptr:%lx",fanout_id*entry_per_group +entry_id +elems_inserted,keys[fanout_id*entry_per_group+elems_inserted+entry_id],next_level,group_id,free_buc_idx,bucket_size+entry_id,buc_ptr);    
+                        //     new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id].print();
+                        // }
                         uint64_t tmp_hash = hash(keys + fanout_id * entry_per_group + elems_inserted + entry_id, sizeof(uint64_t));
                         inner_group->bucket_pointers[free_buc_idx].filter |= cal_filter(tmp_hash);
                         buc->entrys[bucket_size + entry_id] = new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id];
@@ -534,7 +533,7 @@ Retry:
         uintptr_t buc_start_ptr = seg_rmr.raddr + sizeof(Directory) + sizeof(Bucket)*init_group_num*bucket_per_group;
         uint64_t group_cnt = 0 ;
         co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,&dir->cur_level,sizeof(uint64_t),lmr->lkey);
-        log_err("[%lu:%lu:%lu]level:%lu",this->cli_id,this->coro_id,this->key_num,dir->cur_level);
+        // log_err("[%lu:%lu:%lu]level:%lu",this->cli_id,this->coro_id,this->key_num,dir->cur_level);
         while(level <= dir->cur_level){
             uint64_t group_size = init_group_num * (1<<level);
             group_id = pattern % group_size;
@@ -551,10 +550,10 @@ BotRetry:
 
                     uint64_t buc_size = get_size_of_bucket(size,i);
                     for(int entry_id = buc_size ; entry_id>=0 ; entry_id--){
-                        if(this->key_num == 12093){
-                            log_err("[%lu:%lu:%lu]find at level:%lu group:%lu buc:%d buc_ptr:%lx entry_id:%d",this->cli_id,this->coro_id,this->key_num,level,group_id,i,buc_ptr,entry_id);
-                            buc->entrys[entry_id].print();
-                        }
+                        // if(this->key_num == 12093){
+                        //     log_err("[%lu:%lu:%lu]find at level:%lu group:%lu buc:%d buc_ptr:%lx entry_id:%d",this->cli_id,this->coro_id,this->key_num,level,group_id,i,buc_ptr,entry_id);
+                        //     buc->entrys[entry_id].print();
+                        // }
                         co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, kv_block, (buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
                         if (memcmp(key->data, kv_block->data, key->len) == 0)
                         {
