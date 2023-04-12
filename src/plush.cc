@@ -226,7 +226,7 @@ Retry:
 
     if (dir->first_level[group_id].size[buc_id] >= entry_per_bucket)
     {
-        log_err("[%lu:%lu:%lu]migrate_top group:%lu at first level", this->cli_id, this->coro_id, this->key_num,group_id);
+        // log_err("[%lu:%lu:%lu]migrate_top group:%lu at first level", this->cli_id, this->coro_id, this->key_num,group_id);
         co_await migrate_top(group_id);
         co_await conn->cas_n(group_ptr, seg_rmr.rkey, 1, 0);
         goto Retry;
@@ -348,6 +348,7 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
     co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, &dir->cur_level, sizeof(uint64_t), lmr->lkey);
     if (next_level > dir->cur_level)
     {
+        log_err("[%lu:%lu:%lu]fetch_add cur_level to :%lu",this->cli_id,this->coro_id,this->key_num,next_level);
         co_await conn->cas_n(seg_rmr.raddr, seg_rmr.rkey, dir->cur_level, next_level);
     }
 
@@ -384,7 +385,7 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
         if (inner_group->size + sizes[fanout_id] > entry_per_group)
         {
             // 3.2 Migrate group at next level to make room for data from top level
-            log_err("[%lu:%lu:%lu] Migrate group at level:%lu group:%lu to make room ",this->cli_id,this->coro_id,this->key_num,next_level,group_id);
+            // log_err("[%lu:%lu:%lu] Migrate group at level:%lu group:%lu to make room ",this->cli_id,this->coro_id,this->key_num,next_level,group_id);
             co_await migrate_bot(next_level,group_cnt,group_id,group_ptr,buc_start_ptr);
         }
 
@@ -418,6 +419,7 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
                 {
                     for (uint64_t entry_id = 0; entry_id < elems_to_insert; entry_id++)
                     {
+                        // log_err("migrate key:%lu to level:%lu group:%lu buc:%lu entry_id:%lu",keys[fanout_id * entry_per_group + elems_inserted + entry_id],next_level,group_id,free_buc_idx,entry_id);
                         uint64_t tmp_hash = hash(keys + fanout_id * entry_per_group + elems_inserted + entry_id, sizeof(uint64_t));
                         inner_group->bucket_pointers[free_buc_idx].filter |= cal_filter(tmp_hash);
                         buc->entrys[bucket_size + entry_id] = new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id];
@@ -492,10 +494,8 @@ task<> Client::migrate_bot(uint64_t source_level,uint64_t group_cnt,uint64_t gro
 
 task<bool> Client::search(Slice *key, Slice *value)
 {
-    auto pattern = hash(key->data, key->len);
-    uint64_t pattern_1 = (uint64_t)pattern;
-    uint64_t pattern_2 = (uint64_t)(pattern >> 64);
-    uint64_t tmp_fp = fp(pattern_1);
+    uint64_t pattern = hash(key->data, key->len);
+    uint64_t tmp_fp = fp(pattern);
     this->key_num = *(uint64_t *)key->data;
 Retry:
     alloc.ReSet(sizeof(Directory));
@@ -516,14 +516,16 @@ Retry:
     uintptr_t buc_ptr = seg_rmr.raddr + sizeof(Directory) + (group_id*bucket_per_group +buc_id)*sizeof(Bucket);
     co_await conn->read(buc_ptr,seg_rmr.rkey,buc,sizeof(Bucket),lmr->lkey);
     for(int i = dir->first_level[group_id].size[buc_id]-1 ; i >= 0 ;i--){
-        co_await conn->read(ralloc.ptr(buc->entrys[i].offset), seg_rmr.rkey, kv_block, (buc->entrys[i].len) * ALIGNED_SIZE, lmr->lkey);
-        if (memcmp(key->data, kv_block->data, key->len) == 0){
-            co_await conn->read(group_ptr, seg_rmr.rkey, &(dir->first_level[group_id]), sizeof(TopPointer), lmr->lkey);
-            if(dir->first_level[group_id].epoch == epoch){
-                res = kv_block;
-                break;
+        if(buc->entrys[i].fp == tmp_fp){
+            co_await conn->read(ralloc.ptr(buc->entrys[i].offset), seg_rmr.rkey, kv_block, (buc->entrys[i].len) * ALIGNED_SIZE, lmr->lkey);
+            if (memcmp(key->data, kv_block->data, key->len) == 0){
+                co_await conn->read(group_ptr, seg_rmr.rkey, &(dir->first_level[group_id]), sizeof(TopPointer), lmr->lkey);
+                if(dir->first_level[group_id].epoch == epoch){
+                    res = kv_block;
+                    break;
+                }
+                goto Retry;
             }
-            goto Retry;
         }
     }
 
@@ -535,7 +537,6 @@ Retry:
         uintptr_t buc_start_ptr = seg_rmr.raddr + sizeof(Directory) + sizeof(Bucket)*init_group_num*bucket_per_group;
         uint64_t group_cnt = 0 ;
         co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,&dir->cur_level,sizeof(uint64_t),lmr->lkey);
-        // log_err("[%lu:%lu:%lu]level:%lu",this->cli_id,this->coro_id,this->key_num,dir->cur_level);
         while(level <= dir->cur_level){
             uint64_t group_size = init_group_num * (1<<level);
             group_id = pattern % group_size;
@@ -552,15 +553,17 @@ BotRetry:
 
                     uint64_t buc_size = get_size_of_bucket(size,i);
                     for(int entry_id = buc_size ; entry_id>=0 ; entry_id--){
-                        co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, kv_block, (buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
-                        if (memcmp(key->data, kv_block->data, key->len) == 0)
-                        {
-                            co_await conn->read(group_ptr,seg_rmr.rkey,inner_group,sizeof(InnerGroupPointer),lmr->lkey);
-                            if(inner_group->epoch == epoch){
-                                res = kv_block;
-                                break;
-                            }else{
-                                goto BotRetry;
+                        if(buc->entrys[entry_id].fp == tmp_fp){
+                            co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, kv_block, (buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
+                            if (memcmp(key->data, kv_block->data, key->len) == 0)
+                            {
+                                co_await conn->read(group_ptr,seg_rmr.rkey,inner_group,sizeof(InnerGroupPointer),lmr->lkey);
+                                if(inner_group->epoch == epoch){
+                                    res = kv_block;
+                                    break;
+                                }else{
+                                    goto BotRetry;
+                                }
                             }
                         }
                     }
