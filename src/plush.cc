@@ -383,7 +383,8 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
 
         if (inner_group->size + sizes[fanout_id] > entry_per_group)
         {
-            // 3.2 
+            // 3.2 Migrate group at next level to make room for data from top level
+            log_err("[%lu:%lu:%lu] Migrate group at level:%lu group:%lu to make room ",this->cli_id,this->coro_id,this->key_num,next_level,group_id);
             co_await migrate_bot(next_level,group_cnt,group_id,group_ptr,buc_start_ptr);
         }
 
@@ -417,10 +418,6 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
                 {
                     for (uint64_t entry_id = 0; entry_id < elems_to_insert; entry_id++)
                     {
-                        // if(keys[fanout_id * entry_per_group + elems_inserted + entry_id] == 12093){
-                        //     log_err("migrate keys[%lu]:%lu to level:%lu group:%lu free_buc_idx:%lu entry:%lu buc_ptr:%lx",fanout_id*entry_per_group +entry_id +elems_inserted,keys[fanout_id*entry_per_group+elems_inserted+entry_id],next_level,group_id,free_buc_idx,bucket_size+entry_id,buc_ptr);    
-                        //     new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id].print();
-                        // }
                         uint64_t tmp_hash = hash(keys + fanout_id * entry_per_group + elems_inserted + entry_id, sizeof(uint64_t));
                         inner_group->bucket_pointers[free_buc_idx].filter |= cal_filter(tmp_hash);
                         buc->entrys[bucket_size + entry_id] = new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id];
@@ -437,6 +434,10 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
             inner_group->size += elems_inserted;
             inner_group->epoch = epoch;
             co_await conn->write(group_ptr, seg_rmr.rkey, inner_group, 2 * sizeof(uint64_t), lmr->lkey);
+        }
+        if(elems_inserted != sizes[fanout_id]){
+            log_err("[%lu:%lu:%lu]left unrehashed data with elems_inserted:%lu sizes[:%lu]=%lu ",this->cli_id,this->coro_id,this->key_num,elems_inserted,fanout_id,sizes[fanout_id]);
+            exit(-1);
         }
         assert(elems_inserted == sizes[fanout_id]);
     }
@@ -480,7 +481,10 @@ task<> Client::migrate_bot(uint64_t source_level,uint64_t group_cnt,uint64_t gro
     for(uint64_t i = 0 ; i < bucket_per_group ; i++){
         inner_group->bucket_pointers[i].filter = 0;
     }
-    co_await conn->write(group_ptr,seg_rmr.rkey,inner_group->bucket_pointers,sizeof(BucketPointer)*bucket_per_group,lmr->lkey);
+    co_await conn->write(group_ptr + 2*sizeof(uint64_t),seg_rmr.rkey,inner_group->bucket_pointers,sizeof(BucketPointer)*bucket_per_group,lmr->lkey);
+    
+    inner_group->size = 0 ;
+    co_await conn->write(group_ptr ,seg_rmr.rkey,&inner_group->size,sizeof(uint64_t),lmr->lkey);
 
     alloc.free(sizeof(Bucket)*bucket_per_group);
 }
@@ -521,8 +525,6 @@ Retry:
             }
             goto Retry;
         }
-
-
     }
 
     // 4. search in bot
@@ -550,10 +552,6 @@ BotRetry:
 
                     uint64_t buc_size = get_size_of_bucket(size,i);
                     for(int entry_id = buc_size ; entry_id>=0 ; entry_id--){
-                        // if(this->key_num == 12093){
-                        //     log_err("[%lu:%lu:%lu]find at level:%lu group:%lu buc:%d buc_ptr:%lx entry_id:%d",this->cli_id,this->coro_id,this->key_num,level,group_id,i,buc_ptr,entry_id);
-                        //     buc->entrys[entry_id].print();
-                        // }
                         co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, kv_block, (buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
                         if (memcmp(key->data, kv_block->data, key->len) == 0)
                         {

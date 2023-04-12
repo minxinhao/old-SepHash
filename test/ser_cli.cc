@@ -19,7 +19,7 @@
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
-uint64_t load_num = 13000;
+uint64_t load_num = 100000;
 using ClientType = Plush::Client;
 using ServerType = Plush::Server;
 using Slice = Plush::Slice;
