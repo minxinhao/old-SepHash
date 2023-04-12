@@ -14,14 +14,15 @@
 #include "rdma_bench.h"
 #include "cluster_hash.h"
 #include "clevel.h"
+#include "plush.h"
 #include <set>
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
-uint64_t load_num = 10000000;
-using ClientType = CLEVEL::Client;
-using ServerType = CLEVEL::Server;
-using Slice = CLEVEL::Slice;
+uint64_t load_num = 13000;
+using ClientType = Plush::Client;
+using ServerType = Plush::Server;
+using Slice = Plush::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -285,7 +286,9 @@ int main(int argc, char *argv[])
         printf("Run IOPS:%.2lfKops\n", op_cnt / duration);
         fflush(stdout);
 
-        ths[config.num_cli].join();
+        if(config.machine_id==0 && typeid(ClientType) == typeid(CLEVEL::Client)){
+            ths[config.num_cli].join();
+        }
         for (auto gen : gens)
         {
             delete gen;
