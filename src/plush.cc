@@ -151,7 +151,6 @@ task<> Client::reset_remote()
 
     // 重置远端 Lock
     alloc.ReSet(sizeof(Directory));
-    dir = (Directory *)alloc.alloc(sizeof(Directory));
     memset(dir, 0, sizeof(Directory));
     co_await conn->write(lock_rmr.raddr, lock_rmr.rkey, dir, dev_mem_size, lmr->lkey);
 
@@ -202,10 +201,10 @@ task<> Client::insert(Slice *key, Slice *value)
     this->key_num = *(uint64_t *)key->data;
 Retry:
     retry_cnt++;
-    if(retry_cnt>100){
-        log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
-        exit(-1);
-    }
+    // if(retry_cnt>10000){
+    //     log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
+    //     exit(-1);
+    // }
     alloc.ReSet(sizeof(Directory) + kvblock_len);
     // 1. Cal GroupIdx && BucIdx
     uint64_t group_id = pattern % init_group_num;
@@ -220,7 +219,7 @@ Retry:
     // 3. Lock mutex of target group
     if (!co_await conn->cas_n(group_ptr, seg_rmr.rkey, 0, 1))
     {
-        log_err("[%lu:%lu:%lu]fail to lock group:%lu at first level", this->cli_id, this->coro_id, this->key_num,group_id);
+        // log_err("[%lu:%lu:%lu]fail to lock group:%lu at first level", this->cli_id, this->coro_id, this->key_num,group_id);
         goto Retry;
     }
 

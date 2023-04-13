@@ -35,9 +35,11 @@ constexpr uint64_t entry_per_group = entry_per_bucket * bucket_per_group;
 // 固定fanout为2，论文也说的2，不知道为啥代码里面用的16
 constexpr uint64_t fanout = 2;
 
-constexpr uint64_t max_level = 16;
+// constexpr uint64_t max_level = 16;
+constexpr uint64_t max_level = 10;
+constexpr uint64_t max_group_size = (1<<max_level)*init_group_num;
 // (total_key_num) / (entry_per_bucket * bucket_per_group) = (11000000)/(16*16) = 43000
-constexpr uint64_t max_group_size = 43000;
+// constexpr uint64_t max_group_size = 43000;
 
 // 64KB的dev mem，用作lock
 constexpr uint64_t dev_mem_size = (1 << 10) * 64;
