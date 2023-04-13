@@ -210,18 +210,18 @@ Retry:
     uint64_t group_id = pattern % init_group_num;
     uint64_t buc_id = (pattern / init_group_num) % bucket_per_group;
 
-    // 2. Read TopPointer
+    // 2. Lock mutex of target group
     uintptr_t group_ptr = seg_rmr.raddr + sizeof(uint64_t) + sizeof(TopPointer) * group_id;
-    co_await conn->read(group_ptr, seg_rmr.rkey, &(dir->first_level[group_id]), sizeof(TopPointer), lmr->lkey);
-    // log_err("[%lu:%lu:%lu] group:%lu buc:%lu", this->cli_id, this->coro_id, this->key_num,group_id,buc_id);
-
-
-    // 3. Lock mutex of target group
     if (!co_await conn->cas_n(group_ptr, seg_rmr.rkey, 0, 1))
     {
         // log_err("[%lu:%lu:%lu]fail to lock group:%lu at first level", this->cli_id, this->coro_id, this->key_num,group_id);
         goto Retry;
     }
+
+    // 3. Read TopPointer
+    co_await conn->read(group_ptr, seg_rmr.rkey, &(dir->first_level[group_id]), sizeof(TopPointer), lmr->lkey);
+    // log_err("[%lu:%lu:%lu] group:%lu buc:%lu", this->cli_id, this->coro_id, this->key_num,group_id,buc_id);
+
 
     if (dir->first_level[group_id].size[buc_id] >= entry_per_bucket)
     {
@@ -510,6 +510,7 @@ Retry:
     uintptr_t group_ptr = seg_rmr.raddr + sizeof(uint64_t) + sizeof(TopPointer) * group_id;
     co_await conn->read(group_ptr, seg_rmr.rkey, &(dir->first_level[group_id]), sizeof(TopPointer), lmr->lkey);
     uint64_t epoch = dir->first_level[group_id].epoch;
+    // log_err("[%lu:%lu:%lu]find at level:0 group:%lu",this->cli_id,this->coro_id,this->key_num,group_id);
 
     // 3. search in top
     uintptr_t buc_ptr = seg_rmr.raddr + sizeof(Directory) + (group_id*bucket_per_group +buc_id)*sizeof(Bucket);
@@ -543,6 +544,7 @@ Retry:
             InnerGroupPointer* inner_group = &(dir->bottom_levels[group_cnt+group_id]);
 BotRetry:
             co_await conn->read(group_ptr,seg_rmr.rkey,inner_group,sizeof(InnerGroupPointer),lmr->lkey); 
+            // log_err("[%lu:%lu:%lu]find at level:%lu group:%lu",this->cli_id,this->coro_id,this->key_num,level,group_id);
             for(int i= bucket_per_group - 1 ; i >= 0 ; --i){
                 buc_ptr = buc_start_ptr + (group_id * bucket_per_group + i ) * sizeof(Bucket);
                 if(((!inner_group->bucket_pointers[i].filter) & filter) == 0){
