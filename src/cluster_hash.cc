@@ -227,6 +227,15 @@ Retry:
     tmp->offset = ralloc.offset(kvblock_ptr);
     if (entry_id != -1)
     {
+        co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
+        if (dir->dir_lock)
+        {
+            // Resizing
+            // 2.4 unlock bucket list
+            buc->lock = 0;
+            co_await conn->write(fisrt_buc_ptr, seg_rmr.rkey, &buc->lock, sizeof(uint64_t), lmr->lkey);
+            goto Retry;
+        }
         uintptr_t slot_ptr = buc_ptr + sizeof(uint64_t) * 2 + sizeof(Entry) * entry_id;
         co_await conn->write(slot_ptr, seg_rmr.rkey, tmp, sizeof(Entry), lmr->lkey);
     }
@@ -235,12 +244,6 @@ Retry:
     buc->lock = 0;
     co_await conn->write(fisrt_buc_ptr, seg_rmr.rkey, &buc->lock, sizeof(uint64_t), lmr->lkey);
     if(entry_id != -1){
-        // co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
-        // if (dir->dir_lock)
-        // {
-        //     // Resizing
-        //     goto Retry;
-        // }
         co_return;
     }
 

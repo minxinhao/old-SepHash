@@ -19,7 +19,7 @@
 #include <stdint.h>
 #define ORDERED_INSERT
 Config config;
-uint64_t load_num = 10000000;
+uint64_t load_num = 30000;
 using ClientType = CLUSTER::Client;
 using ServerType = CLUSTER::Server;
 using Slice = CLUSTER::Slice;
