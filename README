@@ -1,0 +1,22 @@
+# Run
+
+# 单机运行
+
+mkdir build
+cd build
+cmake ..
+make ser_cli
+# server
+../ser_cli.sh server
+# cli
+../ser_cli.sh 0
+
+# 分布式运行
+# in build directory 
+../sync.sh out
+../ser_cli.sh server
+# in every cli's home/usr : ./ser_cli.sh cli_id
+./run.sh 0 
+
+# 收集数据 in build directory 
+../sync.sh in

@@ -20,9 +20,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 1000000;
-using ClientType = CLUSTER::Client;
-using ServerType = CLUSTER::Server;
-using Slice = CLUSTER::Slice;
+using ClientType = CLEVEL::Client;
+using ServerType = CLEVEL::Server;
+using Slice = CLEVEL::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -289,6 +289,24 @@ int main(int argc, char *argv[])
         if(config.machine_id==0 && typeid(ClientType) == typeid(CLEVEL::Client)){
             ths[config.num_cli].join();
         }
+        if(config.machine_id!=0 && typeid(ClientType) == typeid(CLEVEL::Client)){
+            rdma_clis[config.num_cli] = new rdma_client(dev, so_qp_cap, rdma_default_tempmp_size, config.max_coro, config.cq_size);
+            rdma_conns[config.num_cli] = rdma_clis[config.num_cli]->connect(config.server_ip);
+            rdma_wowait_conns[config.num_cli] = rdma_clis[config.num_cli]->connect(config.server_ip);
+
+            lmrs[config.num_cli * config.num_coro] =
+                    dev.create_mr(cbuf_size, mem_buf + cbuf_size * (config.num_cli * config.num_coro));
+            CLEVEL::Client* check_cli = new CLEVEL::Client(config, lmrs[config.num_cli * config.num_coro], rdma_clis[config.num_cli], rdma_conns[config.num_cli],rdma_wowait_conns[config.num_cli],config.machine_id, config.num_cli, config.num_coro);
+
+            auto th = [&](rdma_client *rdma_cli) {
+                while(rdma_cli->run(check_cli->check_exit())){
+                    // log_err("waiting for rehash exit");
+                }
+            };
+            ths[config.num_cli] = std::thread(th,rdma_clis[config.num_cli]);
+            ths[config.num_cli].join();
+        }
+
         for (auto gen : gens)
         {
             delete gen;

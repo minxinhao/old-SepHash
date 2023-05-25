@@ -371,6 +371,11 @@ Retry:
     goto Retry;
 }
 
+task<bool> Client::check_exit(){
+    co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(Directory),lmr->lkey);
+    co_return dir->is_resizing;
+}
+
 task<> Client::rehash(){
     LevelTable * last_table = (LevelTable*)alloc.alloc(sizeof(LevelTable));
     LevelTable * first_table = (LevelTable*)alloc.alloc(sizeof(LevelTable));

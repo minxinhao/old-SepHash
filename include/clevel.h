@@ -134,6 +134,7 @@ public:
 
     // 用来在Resize的时候Move数据
     task<> rehash();
+    task<bool> check_exit();
 private:
 
     // rdma structs
