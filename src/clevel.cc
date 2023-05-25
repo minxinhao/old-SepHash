@@ -188,7 +188,7 @@ Retry:
     retry_cnt++;
     if(retry_cnt >= 10000){
         log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
-        exit(-1);
+        // exit(-1);
     }
     alloc.ReSet(sizeof(Directory) + kvblock_len + 8 * ALIGNED_SIZE);
 
