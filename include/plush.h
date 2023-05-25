@@ -29,6 +29,7 @@ constexpr uint64_t init_group_num = (1 << init_group_bits);
 // number of bucket in every group
 constexpr uint64_t bucket_per_group = (1 << 4);
 // number of entry in every bucket
+// constexpr uint64_t entry_per_bucket = 8;
 constexpr uint64_t entry_per_bucket = 16;
 // number of entry in every group
 constexpr uint64_t entry_per_group = entry_per_bucket * bucket_per_group;

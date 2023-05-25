@@ -304,6 +304,7 @@ task<> Client::rehash(Bucket *buc, uint64_t size, uint64_t old_level, uint64_t *
         if (buc->entrys[key_id].offset == 0)
         {
             log_err("[%lu:%lu:%lu] empty entry during rehash", this->cli_id, this->coro_id, this->key_num);
+            continue;
         }
         // a. read key
         co_await conn->read(ralloc.ptr(buc->entrys[key_id].offset), seg_rmr.rkey, tmp_block, (buc->entrys[key_id].len) * ALIGNED_SIZE, lmr->lkey);
@@ -422,9 +423,10 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
                         uint64_t tmp_hash = hash(keys + fanout_id * entry_per_group + elems_inserted + entry_id, sizeof(uint64_t));
                         inner_group->bucket_pointers[free_buc_idx].filter |= cal_filter(tmp_hash);
                         buc->entrys[bucket_size + entry_id] = new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id];
-                        co_await conn->write(buc_ptr + (bucket_size + entry_id)*sizeof(Entry),seg_rmr.rkey,&buc->entrys[bucket_size + entry_id],sizeof(Entry),lmr->lkey);
+                        // co_await conn->write(buc_ptr + (bucket_size + entry_id)*sizeof(Entry),seg_rmr.rkey,&buc->entrys[bucket_size + entry_id],sizeof(Entry),lmr->lkey);
                     }
                     elems_inserted += elems_to_insert;
+                    co_await conn->write(buc_ptr + (bucket_size)*sizeof(Entry),seg_rmr.rkey,&buc->entrys[bucket_size],elems_to_insert*sizeof(Entry),lmr->lkey);
                 }
                 // d. update filter and size in bucket pointer
                 co_await conn->write(group_ptr + 2 * sizeof(uint64_t) + free_buc_idx * sizeof(BucketPointer) , seg_rmr.rkey , &(inner_group->bucket_pointers[free_buc_idx]) , sizeof(BucketPointer) , lmr->lkey );
