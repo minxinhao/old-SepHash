@@ -20,9 +20,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = Plush::Client;
-using ServerType = Plush::Server;
-using Slice = Plush::Slice;
+using ClientType = CLUSTER::Client;
+using ServerType = CLUSTER::Server;
+using Slice = CLUSTER::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {

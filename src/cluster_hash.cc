@@ -185,7 +185,15 @@ Retry:
     uint64_t buc_idx = pattern % cur_table->logical_num;
     uintptr_t buc_ptr = cur_table->buc_start + sizeof(Bucket) * buc_idx;
     uintptr_t fisrt_buc_ptr = buc_ptr;
-    // 1.3 read bucket
+
+    // 1.3 lock bucket
+    if (!co_await conn->cas_n(fisrt_buc_ptr, seg_rmr.rkey, 0, 1))
+    {
+        // log_err("[%lu:%lu:%lu] fail to lock bucket list:%lu",this->cli_id,this->coro_id,this->key_num,buc_idx);
+        goto Retry;
+    }
+
+    // 1.4 read bucket
     Bucket *buc = (Bucket *)alloc.alloc(sizeof(Bucket));
     co_await conn->read(buc_ptr, seg_rmr.rkey, buc, sizeof(Bucket), lmr->lkey);
     uintptr_t next_buc = buc->next;
@@ -212,14 +220,7 @@ Retry:
         next_buc = buc->next;
     }
 
-    // 2.2 lock bucket
-    if (!co_await conn->cas_n(fisrt_buc_ptr, seg_rmr.rkey, 0, 1))
-    {
-        // log_err("[%lu:%lu:%lu] fail to lock bucket list:%lu",this->cli_id,this->coro_id,this->key_num,buc_idx);
-        goto Retry;
-    }
-
-    // 2.3 write entry
+    // 2.2 write entry
     Entry *tmp = (Entry *)alloc.alloc(sizeof(Entry));
     tmp->fp = fp(pattern);
     tmp->len = (kvblock_len + ALIGNED_SIZE - 1) / ALIGNED_SIZE;

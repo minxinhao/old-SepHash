@@ -14,7 +14,7 @@ else
     echo "machine" $1
     for read_size in `seq 6 6`;do
         echo "read_size" $((1<<$read_size))
-        for num_cli in `seq 2 2`;do
+        for num_cli in `seq 4 4`;do
             for num_coro in `seq 1 4`;do
                 echo "num_cli" $((1<<$num_cli)) "num_coro" $num_coro 
                 ./ser_cli \
