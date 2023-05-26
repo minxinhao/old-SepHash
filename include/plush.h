@@ -155,7 +155,7 @@ private:
     task<> migrate_top(uint64_t group_id);
     task<> migrate_bot(uint64_t source_level,uint64_t group_cnt,uint64_t group_id,uintptr_t group_ptr,uintptr_t buc_start_ptr);
     task<> rehash(Bucket *bucket, uint64_t size, uint64_t level, uint64_t* keys, Entry *new_entrys, uint64_t *sizes);
-    task<> bulk_level_insert(uint64_t level, uint64_t epoch, const uint64_t *keys,const Entry *new_entrys, const uint64_t *sizes);
+    task<> bulk_level_insert(uint64_t level, uint64_t epoch, const uint64_t *keys,Entry *new_entrys, const uint64_t *sizes);
     
     // rdma structs
     rdma_client *cli;

@@ -342,7 +342,7 @@ task<> Client::rehash(Bucket *buc, uint64_t size, uint64_t old_level, uint64_t *
 /// @param new_entrys 通过rehash设置的entrys数组，大小为fanout * entry_per_group
 /// @param sizes uint64 [fanout]数组，记录fanout对应的group中的key数量
 /// @return
-task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint64_t *keys, const Entry *new_entrys, const uint64_t *sizes)
+task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint64_t *keys, Entry *new_entrys, const uint64_t *sizes)
 {
     // 1. check cur_level
     co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, &dir->cur_level, sizeof(uint64_t), lmr->lkey);
@@ -365,7 +365,7 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
     }
 
     // 3. write key to bucket in new level
-    Bucket *buc = (Bucket *)alloc.alloc(sizeof(Bucket));
+    Bucket *buc = (Bucket *)alloc.alloc(sizeof(Bucket)*entry_per_group);
     for (uint64_t fanout_id = 0; fanout_id < fanout; fanout_id++)
     {
         // log_err("migrate fanout:%lu with size:%lu",fanout_id,sizes[fanout_id]);
@@ -394,6 +394,10 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
         {
             // try bulk insert
             uint64_t free_buc_idx = get_free_bucket_idx(inner_group->size);
+            uint64_t first_free_buc_idx = free_buc_idx;
+            uint64_t first_buc_size = get_size_of_bucket(inner_group->size, free_buc_idx);
+            uintptr_t first_buc_ptr = buc_start_ptr + (group_id * bucket_per_group + free_buc_idx) * sizeof(Bucket);
+            uint64_t buc_cnt = 0 ;
             if (free_buc_idx == -1)
             {
                 log_err("No more free buc during migrate");
@@ -422,18 +426,22 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
                         // log_err("migrate key:%lu to level:%lu group:%lu buc:%lu entry_id:%lu",keys[fanout_id * entry_per_group + elems_inserted + entry_id],next_level,group_id,free_buc_idx,entry_id);
                         uint64_t tmp_hash = hash(keys + fanout_id * entry_per_group + elems_inserted + entry_id, sizeof(uint64_t));
                         inner_group->bucket_pointers[free_buc_idx].filter |= cal_filter(tmp_hash);
-                        buc->entrys[bucket_size + entry_id] = new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id];
+                        buc->entrys[elems_inserted+entry_id] = new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id];
                         // co_await conn->write(buc_ptr + (bucket_size + entry_id)*sizeof(Entry),seg_rmr.rkey,&buc->entrys[bucket_size + entry_id],sizeof(Entry),lmr->lkey);
                     }
                     elems_inserted += elems_to_insert;
-                    co_await conn->write(buc_ptr + (bucket_size)*sizeof(Entry),seg_rmr.rkey,&buc->entrys[bucket_size],elems_to_insert*sizeof(Entry),lmr->lkey);
+                    // co_await conn->write(buc_ptr + (bucket_size)*sizeof(Entry),seg_rmr.rkey,&buc->entrys[bucket_size],elems_to_insert*sizeof(Entry),lmr->lkey);
                 }
                 // d. update filter and size in bucket pointer
-                co_await conn->write(group_ptr + 2 * sizeof(uint64_t) + free_buc_idx * sizeof(BucketPointer) , seg_rmr.rkey , &(inner_group->bucket_pointers[free_buc_idx]) , sizeof(BucketPointer) , lmr->lkey );
+                // co_await conn->write(group_ptr + 2 * sizeof(uint64_t) + free_buc_idx * sizeof(BucketPointer) , seg_rmr.rkey , &(inner_group->bucket_pointers[free_buc_idx]) , sizeof(BucketPointer) , lmr->lkey );
                 free_buc_idx++;
+                buc_cnt++;
             }
 
             // 3.4 update inner group pointer
+            co_await conn->write(first_buc_ptr+first_buc_size*sizeof(Entry),seg_rmr.rkey,buc->entrys,elems_inserted*sizeof(Entry),lmr->lkey);
+            co_await conn->write(group_ptr + 2 * sizeof(uint64_t) + first_free_buc_idx * sizeof(BucketPointer) , seg_rmr.rkey , &(inner_group->bucket_pointers[first_free_buc_idx]) , buc_cnt*sizeof(BucketPointer) , lmr->lkey );
+            // log_err("");
             inner_group->size += elems_inserted;
             inner_group->epoch = epoch;
             co_await conn->write(group_ptr, seg_rmr.rkey, inner_group, 2 * sizeof(uint64_t), lmr->lkey);
