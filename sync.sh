@@ -17,7 +17,7 @@ else
     do 
         echo "cli" $cli
         rm -f ./out$cli.txt
-        sshpass -p 'mxh' scp mxh@$cli:/home/mxh/out.txt ./out$cli.txt
+        sshpass -p 'mxh' scp mxh@$cli:/home/mxh/out.txt ./result/out$cli.txt
         ((cnt += 1))
     done
 fi

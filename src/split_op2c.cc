@@ -367,8 +367,8 @@ void Client::merge_insert(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_
         if (data[off_1].sign != sign)
         {
             log_err("[%lu:%lu:%lu]wrong sign",cli_id,coro_id,this->key_num);
-            print_mainseg(data, len);
-            exit(-1);
+            // print_mainseg(data, len);
+            // exit(-1);
         }
         if (data[off_1].fp <= old_seg[off_2].fp)
         {
