@@ -16,6 +16,7 @@ struct Config
     uint64_t mem_size;
     uint64_t num_op;
     uint64_t read_size;
+    uint64_t load_num;
     char work_load; // YCSB : a,b,c,d; e有scan,f有RMW，暂时不弄了
 
     // Internel States For YCSB
@@ -45,6 +46,7 @@ struct Config
         cmd_parser.add<double>("update_frac", 'p', "update_frac", false, 0.0);
         cmd_parser.add<double>("delete_frac", 'q', "delete_frac", false, 0.0);
         cmd_parser.add<uint64_t>("read_size", 'r', "read_size", false, 64);
+        cmd_parser.add<uint64_t>("load_num", 's', "load_num", false, 10000);
 
         cmd_parser.parse_check(argc, argv);
 
@@ -65,6 +67,7 @@ struct Config
         update_frac = cmd_parser.get<double>("update_frac");
         delete_frac = cmd_parser.get<double>("delete_frac");
         read_size = cmd_parser.get<uint64_t>("read_size");
+        load_num = cmd_parser.get<uint64_t>("load_num");
 
         if(insert_frac + update_frac + read_frac + delete_frac != 1.0){
             printf("err fraction of operations\n");

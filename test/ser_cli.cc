@@ -20,9 +20,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = Plush::Client;
-using ServerType = Plush::Server;
-using Slice = Plush::Slice;
+using ClientType = RACE::Client;
+using ServerType = RACE::Server;
+using Slice = RACE::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -153,6 +153,7 @@ requires KVTrait<Client, Slice *, Slice *> task<> run(Generator *gen, Client *cl
 int main(int argc, char *argv[])
 {
     config.ParseArg(argc, argv);
+    load_num = config.load_num;
     if (config.is_server)
     {
         ServerType ser(config);
