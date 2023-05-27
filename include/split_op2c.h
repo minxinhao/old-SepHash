@@ -18,11 +18,11 @@
 
 namespace SPLIT_OP2C
 {
-constexpr uint64_t SEGMENT_SIZE = 512;
+constexpr uint64_t SEGMENT_SIZE = 1024;
 constexpr uint64_t SLOT_PER_SEG = ((SEGMENT_SIZE) / (sizeof(uint64_t)+sizeof(uint8_t)));
 constexpr uint64_t SLOT_BATCH_SIZE = 8;
 constexpr uint64_t RETRY_LIMIT = (SLOT_PER_SEG/SLOT_BATCH_SIZE); // TODO : 后期试试改成其他较小的值
-constexpr uint64_t MAX_MAIN_SIZE = 32 * SLOT_PER_SEG;
+constexpr uint64_t MAX_MAIN_SIZE = 8 * SLOT_PER_SEG;
 constexpr uint64_t MAX_FP_INFO = 256;
 constexpr uint64_t INIT_DEPTH = 4;
 constexpr uint64_t MAX_DEPTH = 16;

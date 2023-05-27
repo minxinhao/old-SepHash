@@ -9,7 +9,9 @@ run_iops_regex = r'Run IOPS:(\d+\.\d+)Kops'
 results = {}
 
 # 指定所有输入文件的名称或路径
-input_files = ['out192.168.1.51.txt', 'out192.168.1.52.txt']
+# input_files = ['out192.168.1.51.txt', 'out192.168.1.52.txt']
+# input_files = ['out192.168.1.51.txt', 'out192.168.1.52.txt','out192.168.1.53.txt', 'out192.168.1.33.txt']
+input_files = ['out192.168.1.51.txt', 'out192.168.1.52.txt','out192.168.1.53.txt', 'out192.168.1.33.txt','out192.168.1.44.txt', 'out192.168.1.69.txt','out192.168.1.88.txt', 'out192.168.1.89.txt']
 
 # 遍历所有的输入文件
 for input_file in input_files:

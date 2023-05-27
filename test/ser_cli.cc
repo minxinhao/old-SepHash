@@ -20,9 +20,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = SPLIT_OP2C::Client;
-using ServerType = SPLIT_OP2C::Server;
-using Slice = SPLIT_OP2C::Slice;
+using ClientType = CLEVEL::Client;
+using ServerType = CLEVEL::Server;
+using Slice = CLEVEL::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -161,7 +161,7 @@ int main(int argc, char *argv[])
     }
     else
     {
-        uint64_t cbuf_size = (1ul << 20) * 100;
+        uint64_t cbuf_size = (1ul << 20) * 200;
         char *mem_buf = (char *)malloc(cbuf_size * (config.num_cli * config.num_coro + 1));
         rdma_dev dev("mlx5_0", 1, config.roce_flag);
         std::vector<ibv_mr *> lmrs(config.num_cli * config.num_coro + 1, nullptr);

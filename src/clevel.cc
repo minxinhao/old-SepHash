@@ -186,7 +186,7 @@ task<> Client::insert(Slice *key, Slice *value)
     KVBlock *tmp_block = (KVBlock *)alloc.alloc(8 * ALIGNED_SIZE);
 Retry:
     retry_cnt++;
-    if(retry_cnt >= 10000){
+    if(retry_cnt >= 1000000){
         log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
         // exit(-1);
     }
@@ -387,10 +387,13 @@ task<> Client::rehash(){
     memset(zero_table,0,sizeof(Bucket)*zero_size);
     log_err("[%lu:%lu:%lu]rehash",this->cli_id,this->coro_id,this->key_num);
     bool resize_flag = false;
+    bool exit_flag = false;
+    uint64_t exit_cnt = 0; // 仅用于run有insert时
     while(true){
         co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(Directory),lmr->lkey);
         // log_err("[%lu:%lu:%lu]read dir",this->cli_id,this->coro_id,this->key_num);
         if(dir->is_resizing){
+            if(exit_flag) exit_cnt++;
             log_err("[%lu:%lu:%lu]Detect resize with dir->first_level:%lx dir->last_level:%lx",this->cli_id,this->coro_id,this->key_num,dir->first_level,dir->last_level);
             // 1. read last level header
             co_await conn->read(dir->last_level,seg_rmr.rkey,last_table,sizeof(LevelTable),lmr->lkey);
@@ -506,8 +509,12 @@ Retry:
             // 4. Check Exit
             co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(Directory),lmr->lkey);
             if(dir->start_cnt==0 && resize_flag ){
-                log_err("[%lu:%lu:%lu] rehash exit",this->cli_id,this->coro_id,this->key_num);
-                co_return;
+                if(exit_cnt){
+                    log_err("[%lu:%lu:%lu] rehash exit",this->cli_id,this->coro_id,this->key_num);
+                    co_return;
+                }else{
+                    exit_flag = true;
+                }
             }
         }
     }
