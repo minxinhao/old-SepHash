@@ -13,6 +13,7 @@
 #include <math.h>
 #include <tuple>
 #include <vector>
+#include <atomic>
 
 #define WO_WAIT_WRITE
 
@@ -133,7 +134,7 @@ public:
     task<> remove(Slice *key);
 
     // 用来在Resize的时候Move数据
-    task<> rehash();
+    task<> rehash(std::atomic_bool& exit_flag);
     task<bool> check_exit();
 private:
 

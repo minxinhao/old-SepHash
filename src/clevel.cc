@@ -376,7 +376,7 @@ task<bool> Client::check_exit(){
     co_return dir->is_resizing;
 }
 
-task<> Client::rehash(){
+task<> Client::rehash(std::atomic_bool& extern_flag){
     LevelTable * last_table = (LevelTable*)alloc.alloc(sizeof(LevelTable));
     LevelTable * first_table = (LevelTable*)alloc.alloc(sizeof(LevelTable));
     Bucket* buc1 = (Bucket*)alloc.alloc(sizeof(Bucket));
@@ -389,7 +389,7 @@ task<> Client::rehash(){
     bool resize_flag = false;
     bool exit_flag = false;
     uint64_t exit_cnt = 0; // 仅用于run有insert时
-    while(true){
+    while(extern_flag.load()){
         co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,dir,sizeof(Directory),lmr->lkey);
         // log_err("[%lu:%lu:%lu]read dir",this->cli_id,this->coro_id,this->key_num);
         if(dir->is_resizing){

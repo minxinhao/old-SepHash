@@ -199,6 +199,7 @@ int main(int argc, char *argv[])
         }
 
         // For Rehash Thread
+        std::atomic_bool exit_flag{true};
         if(config.machine_id==0 && typeid(ClientType) == typeid(CLEVEL::Client)){
             rdma_clis[config.num_cli] = new rdma_client(dev, so_qp_cap, rdma_default_tempmp_size, config.max_coro, config.cq_size);
             rdma_conns[config.num_cli] = rdma_clis[config.num_cli]->connect(config.server_ip);
@@ -208,7 +209,7 @@ int main(int argc, char *argv[])
                     dev.create_mr(cbuf_size, mem_buf + cbuf_size * (config.num_cli * config.num_coro));
             CLEVEL::Client* rehash_cli = new CLEVEL::Client(config, lmrs[config.num_cli * config.num_coro], rdma_clis[config.num_cli], rdma_conns[config.num_cli],rdma_wowait_conns[config.num_cli],config.machine_id, config.num_cli, config.num_coro);
             auto th = [&](rdma_client *rdma_cli) {
-                rdma_cli->run(rehash_cli->rehash());
+                rdma_cli->run(rehash_cli->rehash(exit_flag));
             };
             ths[config.num_cli] = std::thread(th,rdma_clis[config.num_cli]);
         }
@@ -287,6 +288,7 @@ int main(int argc, char *argv[])
         printf("Run IOPS:%.2lfKops\n", op_cnt / duration);
         fflush(stdout);
 
+        exit_flag.store(false);
         if(config.machine_id==0 && typeid(ClientType) == typeid(CLEVEL::Client)){
             ths[config.num_cli].join();
         }
