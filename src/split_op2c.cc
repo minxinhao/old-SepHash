@@ -366,7 +366,7 @@ void Client::merge_insert(Slot *data, uint64_t len, Slot *old_seg, uint64_t old_
     {
         if (data[off_1].sign != sign)
         {
-            log_err("[%lu:%lu:%lu]wrong sign",cli_id,coro_id,this->key_num);
+            // log_err("[%lu:%lu:%lu]wrong sign",cli_id,coro_id,this->key_num);
             // print_mainseg(data, len);
             // exit(-1);
         }
@@ -695,7 +695,7 @@ Retry:
         uintptr_t new_cur_ptr = co_await check_gd(segloc);
         uint64_t new_seg_loc = get_seg_loc(pattern, dir->global_depth);
         if(new_cur_ptr != cur_seg_ptr || segloc != new_seg_loc){
-            log_err("[%lu:%lu:%lu]stale cur_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,cur_seg_ptr,new_cur_ptr);
+            // log_err("[%lu:%lu:%lu]stale cur_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,cur_seg_ptr,new_cur_ptr);
             this->offset[segloc].offset = 0;
             this->offset[segloc].main_seg_ptr = dir->segs[segloc].main_seg_ptr;
             // co_await std::move(read_bit_map);
@@ -703,7 +703,7 @@ Retry:
             goto Retry;
         } 
         // 更新所有指向此Segment的DirEntry
-        log_err("[%lu:%lu:%lu]stale main_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,seg_meta->main_seg_ptr,this->offset[segloc].main_seg_ptr);
+        // log_err("[%lu:%lu:%lu]stale main_seg_ptr for segloc:%lx with old:%lx new:%lx",cli_id,coro_id,this->key_num,segloc,seg_meta->main_seg_ptr,this->offset[segloc].main_seg_ptr);
         uint64_t new_local_depth = seg_meta->local_depth;
         uint64_t stride = (1llu) << (dir->global_depth - new_local_depth);
         uint64_t cur_seg_loc;
@@ -769,7 +769,7 @@ Retry:
             if (curseg_slots[i] != 0 && curseg_slots[i].fp == pattern_fp1 && curseg_slots[i].dep == dep_info && curseg_slots[i].fp_2 == pattern_fp2)
             {
                 co_await conn->read(ralloc.ptr(curseg_slots[i].offset), seg_rmr.rkey, kv_block, (curseg_slots[i].len) * ALIGNED_SIZE, lmr->lkey);
-                log_err("[%lu:%lu:%lu]read at segloc:%lx cur_seg with: pattern_fp1:%lx pattern_fp2:%lx dep_info:%x seg slot:fp:%x fp2:%x dep:%x",cli_id,coro_id,this->key_num,segloc,pattern_fp1,pattern_fp2,dep_info,curseg_slots[i].fp,curseg_slots[i].fp_2,curseg_slots[i].dep);
+                // log_err("[%lu:%lu:%lu]read at segloc:%lx cur_seg with: pattern_fp1:%lx pattern_fp2:%lx dep_info:%x seg slot:fp:%x fp2:%x dep:%x",cli_id,coro_id,this->key_num,segloc,pattern_fp1,pattern_fp2,dep_info,curseg_slots[i].fp,curseg_slots[i].fp_2,curseg_slots[i].dep);
                 if (memcmp(key->data, kv_block->data, key->len) == 0)
                 {
                     res_slot = i;
@@ -798,6 +798,7 @@ Retry:
 
 task<> Client::update(Slice *key, Slice *value)
 {
+    co_await this->insert(key,value);
     co_return;
 }
 task<> Client::remove(Slice *key)
