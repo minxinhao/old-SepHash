@@ -173,7 +173,7 @@ class Client : public BasicDB
     task<> reset_remote();
 
     task<> insert(Slice *key, Slice *value);
-    task<bool> search(Slice *key, Slice *value);
+    task<std::tuple<uintptr_t, uint64_t>> search(Slice *key, Slice *value);
     task<> update(Slice *key, Slice *value);
     task<> remove(Slice *key);
 

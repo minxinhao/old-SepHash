@@ -649,7 +649,7 @@ task<> Client::UnlockDir()
     co_await conn->cas_n(lock_rmr.raddr, lock_rmr.rkey, 1, 0);
 }
 
-task<bool> Client::search(Slice *key, Slice *value)
+task<std::tuple<uintptr_t, uint64_t>> Client::search(Slice *key, Slice *value)
 {
     // 1. Cal Segloc && Pattern
     uint64_t pattern = (uint64_t)hash(key->data, key->len);
@@ -657,6 +657,8 @@ task<bool> Client::search(Slice *key, Slice *value)
     uint64_t pattern_fp2 = fp2(pattern);
     auto [bit_loc, bit_info] = get_fp_bit(pattern_fp1,pattern_fp2);
     this->key_num = *(uint64_t *)key->data;
+    uintptr_t slot_ptr;
+    uint64_t slot_content;
 Retry:
     alloc.ReSet(sizeof(Directory));
     uint64_t segloc = get_seg_loc(pattern, dir->global_depth);
@@ -745,6 +747,8 @@ Retry:
                     co_await wo_wait_conn->read(ralloc.ptr(main_seg[i].offset), seg_rmr.rkey, kv_block,(main_seg[i].len) * ALIGNED_SIZE, lmr->lkey);
                     if (memcmp(key->data, kv_block->data, key->len) == 0)
                     {
+                        slot_ptr = main_seg_ptr + (start_pos + i) * sizeof(Slot);
+                        slot_content = main_seg[i];
                         res_slot = i;
                         res = kv_block;
                         break;
@@ -772,6 +776,8 @@ Retry:
                 // log_err("[%lu:%lu:%lu]read at segloc:%lx cur_seg with: pattern_fp1:%lx pattern_fp2:%lx dep_info:%x seg slot:fp:%x fp2:%x dep:%x",cli_id,coro_id,this->key_num,segloc,pattern_fp1,pattern_fp2,dep_info,curseg_slots[i].fp,curseg_slots[i].fp_2,curseg_slots[i].dep);
                 if (memcmp(key->data, kv_block->data, key->len) == 0)
                 {
+                    slot_ptr = cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta) +  i * sizeof(Slot);
+                    slot_content = curseg_slots[i];
                     res_slot = i;
                     res = kv_block;
                     break;
@@ -784,7 +790,7 @@ Retry:
     {
         value->len = res->v_len;
         memcpy(value->data, res->data + res->k_len, value->len);
-        co_return true;
+        co_return std::make_tuple(slot_ptr, slot_content);;
     }
 
     // log_err("[%lu:%lu:%lu] No match key at segloc:%lx with local_depth:%lu and global_depth:%lu seg_ptr:%lx main_seg_ptr:%lx",
@@ -793,14 +799,50 @@ Retry:
     // log_err("[%lu:%lu:%lu] segloc:%lx bit_loc:%lu bit_info:%16lx fp_bitmap[%lu]&bit_info = %lu",cli_id,coro_id,this->key_num,segloc,bit_loc,bit_info,bit_loc,seg_meta->fp_bitmap[bit_loc]&bit_info);
     // print_bit_map(seg_meta->fp_bitmap);
     // exit(-1);
-    co_return false;
+    co_return std::make_tuple(0ull, 0);
 }
+
+// task<> Client::update(Slice *key, Slice *value)
+// {
+//     co_await this->insert(key,value);
+//     co_return;
+// }
 
 task<> Client::update(Slice *key, Slice *value)
 {
-    co_await this->insert(key,value);
+    uint64_t pattern = (uint64_t)hash(key->data, key->len);
+    KVBlock *kv_block = InitKVBlock(key, value, &alloc);
+    uint64_t kvblock_len = key->len + value->len + sizeof(uint64_t) * 2;
+    uint64_t kvblock_ptr = ralloc.alloc(kvblock_len);
+    wo_wait_conn->pure_write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey);
+
+    char data[1024];
+    Slice ret_value;
+    ret_value.data = data;
+    auto [slot_ptr, old_slot] = co_await search(key, &ret_value);
+    
+    Slot *tmp = (Slot *)alloc.alloc(sizeof(Slot));
+    Slot old = (Slot) old_slot;
+    tmp->dep = old.dep;
+    tmp->fp = fp(pattern);
+    tmp->len = (kvblock_len + ALIGNED_SIZE - 1) / ALIGNED_SIZE;
+    tmp->sign = old.sign;
+    tmp->offset = ralloc.offset(kvblock_ptr);
+    tmp->fp_2 = fp2(pattern);
+
+    if (slot_ptr != 0ull)
+    {
+        // log_err("[%lu:%lu]slot_ptr:%lx slot:%lx for %lu to be updated with new slot: fp:%d len:%d offset:%lx",cli_id,coro_id,slot_ptr,old_slot,*(uint64_t*)key->data,tmp->fp,tmp->len,tmp->offset);
+        // 3rd RTT: Setting the key-value block to full zero
+        if (!co_await conn->cas_n(slot_ptr, seg_rmr.rkey, old_slot, *(uint64_t*)tmp)){
+            log_err("[%lu:%lu]Fail to update key : %lu",cli_id,coro_id,*(uint64_t*)key->data);
+        }
+    }else{
+        log_err("[%lu:%lu]No match key for %lu to update",cli_id,coro_id,*(uint64_t*)key->data);
+    }
     co_return;
 }
+
 task<> Client::remove(Slice *key)
 {
     co_return;
