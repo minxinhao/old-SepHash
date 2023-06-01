@@ -211,7 +211,7 @@ Retry:
     retry_cnt++;
     if (retry_cnt > 2)
     {
-        log_err("[%lu:%lu:%lu]too much retry", this->cli_id, this->coro_id, this->key_num);
+        // log_err("[%lu:%lu:%lu]too much retry", this->cli_id, this->coro_id, this->key_num);
         //     exit(-1);
     }
     alloc.ReSet(local_dir_size + kvblock_len);
@@ -223,7 +223,7 @@ Retry:
     uintptr_t group_ptr = seg_rmr.raddr + sizeof(uint64_t) + sizeof(TopPointer) * group_id;
     if (!co_await conn->cas_n(group_ptr, seg_rmr.rkey, 0, 1))
     {
-        log_err("[%lu:%lu:%lu]fail to lock group:%lu at first level", this->cli_id, this->coro_id, this->key_num, group_id);
+        // log_err("[%lu:%lu:%lu]fail to lock group:%lu at first level", this->cli_id, this->coro_id, this->key_num, group_id);
         goto Retry;
     }
 
