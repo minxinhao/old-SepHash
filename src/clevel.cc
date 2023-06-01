@@ -598,6 +598,7 @@ Retry:
 
 task<> Client::update(Slice *key, Slice *value)
 {
+    co_await insert(key,value);
     co_return;
 }
 task<> Client::remove(Slice *key)

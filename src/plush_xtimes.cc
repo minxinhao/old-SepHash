@@ -1,5 +1,5 @@
-#include "plush.h"
-namespace Plush
+#include "plush_xtimes.h"
+namespace Plush_XTIMES
 {
 
 inline __attribute__((always_inline)) uint64_t fp(uint64_t pattern)
@@ -133,8 +133,10 @@ Client::Client(Config &config, ibv_mr *_lmr, rdma_client *_cli, rdma_conn *_conn
     miss_cnt = 0;
 
     // sync dir
-    dir = (Directory *)alloc.alloc(sizeof(Directory));
-    memset(dir, 0, sizeof(Directory));
+    // dir = (Directory *)alloc.alloc(sizeof(Directory));
+    // memset(dir, 0, sizeof(Directory));
+    // 这里directory过大，只容纳第一层 TopPointer和保留一定InnerGroupPointer（第二层的大小）作为临时使用
+    dir = (Directory *)alloc.alloc(sizeof(uint64_t) + sizeof(TopPointer) * init_group_num + sizeof(InnerGroupPointer) * init_group_num * fanout);
 }
 
 Client::~Client()
@@ -149,14 +151,19 @@ task<> Client::reset_remote()
     server_alloc.Set((char *)seg_rmr.raddr, seg_rmr.rlen);
     server_alloc.alloc(sizeof(Directory));
 
-    // 重置远端 Lock
     alloc.ReSet(sizeof(Directory));
-    memset(dir, 0, sizeof(Directory));
-    co_await conn->write(lock_rmr.raddr, lock_rmr.rkey, dir, dev_mem_size, lmr->lkey);
+    uint64_t local_dir_size = sizeof(uint64_t) + sizeof(TopPointer) * init_group_num + sizeof(InnerGroupPointer) * init_group_num * fanout;
+    memset(dir, 0, local_dir_size);
 
     // 重置远端 Directory
     dir->cur_level = 0;
-    co_await conn->write(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);
+    co_await conn->write(seg_rmr.raddr, seg_rmr.rkey, dir, local_dir_size, lmr->lkey);
+    uintptr_t inner_group_ptr = seg_rmr.raddr + local_dir_size;
+    for (uint64_t cnt = init_group_num * fanout; cnt < max_group_size; cnt += init_group_num * fanout)
+    {
+        co_await conn->write(inner_group_ptr, seg_rmr.rkey, dir->bottom_levels, sizeof(InnerGroupPointer) * init_group_num * fanout, lmr->lkey);
+        inner_group_ptr += sizeof(InnerGroupPointer) * init_group_num * fanout;
+    }
 }
 
 task<> Client::start(uint64_t total)
@@ -189,7 +196,8 @@ task<> Client::insert(Slice *key, Slice *value)
     op_cnt++;
     uint64_t op_size = (1 << 20) * 1;
     // 因为存在pure_write,为上一个操作保留的空间，1MB够用了
-    alloc.ReSet(sizeof(Directory));
+    uint64_t local_dir_size = sizeof(uint64_t) + sizeof(TopPointer) * init_group_num + sizeof(InnerGroupPointer) * init_group_num * fanout;
+    alloc.ReSet(local_dir_size);
     uint64_t pattern = hash(key->data, key->len);
     uint64_t tmp_fp = fp(pattern);
     KVBlock *kv_block = InitKVBlock(key, value, &alloc);
@@ -201,11 +209,12 @@ task<> Client::insert(Slice *key, Slice *value)
     this->key_num = *(uint64_t *)key->data;
 Retry:
     retry_cnt++;
-    // if(retry_cnt>10000){
-    //     log_err("[%lu:%lu:%lu]too much retry",this->cli_id,this->coro_id,this->key_num);
-    //     exit(-1);
-    // }
-    alloc.ReSet(sizeof(Directory) + kvblock_len);
+    if (retry_cnt > 2)
+    {
+        log_err("[%lu:%lu:%lu]too much retry", this->cli_id, this->coro_id, this->key_num);
+        //     exit(-1);
+    }
+    alloc.ReSet(local_dir_size + kvblock_len);
     // 1. Cal GroupIdx && BucIdx
     uint64_t group_id = pattern % init_group_num;
     uint64_t buc_id = (pattern / init_group_num) % bucket_per_group;
@@ -214,14 +223,13 @@ Retry:
     uintptr_t group_ptr = seg_rmr.raddr + sizeof(uint64_t) + sizeof(TopPointer) * group_id;
     if (!co_await conn->cas_n(group_ptr, seg_rmr.rkey, 0, 1))
     {
-        // log_err("[%lu:%lu:%lu]fail to lock group:%lu at first level", this->cli_id, this->coro_id, this->key_num,group_id);
+        log_err("[%lu:%lu:%lu]fail to lock group:%lu at first level", this->cli_id, this->coro_id, this->key_num, group_id);
         goto Retry;
     }
 
     // 3. Read TopPointer
     co_await conn->read(group_ptr, seg_rmr.rkey, &(dir->first_level[group_id]), sizeof(TopPointer), lmr->lkey);
     // log_err("[%lu:%lu:%lu] group:%lu buc:%lu", this->cli_id, this->coro_id, this->key_num,group_id,buc_id);
-
 
     if (dir->first_level[group_id].size[buc_id] >= entry_per_bucket)
     {
@@ -269,16 +277,17 @@ task<> Client::migrate_top(uint64_t group_id)
 
     // 3. insert bucket to next level
     co_await bulk_level_insert(1, epoch, keys, new_entrys, sizes);
-     
+
     // 4. fetch_add epoch
     uintptr_t group_ptr = seg_rmr.raddr + sizeof(uint64_t) + group_id * sizeof(TopPointer);
-    co_await conn->fetch_add(group_ptr+sizeof(uint64_t),seg_rmr.rkey,dir->first_level[group_id].epoch,1);
+    co_await conn->fetch_add(group_ptr + sizeof(uint64_t), seg_rmr.rkey, dir->first_level[group_id].epoch, 1);
 
     // 5. clear bucket size of top level at group_id
-    for (uint64_t idx = 0; idx < bucket_per_group; ++idx) {
-        dir->first_level[group_id].size[idx] = 0 ;
+    for (uint64_t idx = 0; idx < bucket_per_group; ++idx)
+    {
+        dir->first_level[group_id].size[idx] = 0;
     }
-    co_await conn->write(group_ptr + 2*sizeof(uint64_t),seg_rmr.rkey,dir->first_level[group_id].size,sizeof(uint64_t)*bucket_per_group , lmr->lkey);
+    co_await conn->write(group_ptr + 2 * sizeof(uint64_t), seg_rmr.rkey, dir->first_level[group_id].size, sizeof(uint64_t) * bucket_per_group, lmr->lkey);
     alloc.free(sizeof(Bucket) * bucket_per_group);
 }
 
@@ -295,7 +304,7 @@ task<> Client::rehash(Bucket *buc, uint64_t size, uint64_t old_level, uint64_t *
     KVBlock *tmp_block = (KVBlock *)alloc.alloc(8 * ALIGNED_SIZE);
     uint64_t new_group_id; // 或者叫fanout_id
     uint64_t pattern;
-    uint64_t group_size = init_group_num * (1 << (old_level + 1));
+    uint64_t group_size = init_group_num * (fanout << (fanout_bits * old_level));
     uint64_t tmp_key;
     uint64_t *pos;
 
@@ -313,7 +322,7 @@ task<> Client::rehash(Bucket *buc, uint64_t size, uint64_t old_level, uint64_t *
         // b. cal group id
         pattern = hash(tmp_block->data, tmp_block->k_len);
         new_group_id = pattern % group_size;
-        new_group_id = new_group_id >> (init_group_bits + old_level);
+        new_group_id = new_group_id >> (init_group_bits + fanout_bits * old_level);
 
         // c. remove duplicate key
         uint64_t *first = keys + (new_group_id * entry_per_group);
@@ -348,24 +357,24 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
     co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, &dir->cur_level, sizeof(uint64_t), lmr->lkey);
     if (next_level > dir->cur_level)
     {
-        log_err("[%lu:%lu:%lu]fetch_add cur_level to :%lu",this->cli_id,this->coro_id,this->key_num,next_level);
+        log_err("[%lu:%lu:%lu]fetch_add cur_level to :%lu", this->cli_id, this->coro_id, this->key_num, next_level);
         co_await conn->cas_n(seg_rmr.raddr, seg_rmr.rkey, dir->cur_level, next_level);
     }
 
     // 2. Cal Next Level header ptr and buc ptr
-    uint64_t group_size = init_group_num * (1 << next_level);
+    uint64_t group_size = init_group_num * (fanout << (fanout_bits * (next_level-1)));
     uintptr_t group_start_ptr = seg_rmr.raddr + sizeof(uint64_t) + sizeof(TopPointer) * init_group_num;
     uintptr_t buc_start_ptr = seg_rmr.raddr + sizeof(Directory) + sizeof(Bucket) * bucket_per_group * init_group_num;
     uint64_t group_cnt = 0;
     for (uint64_t level_id = 1; level_id < next_level; level_id++)
     {
-        group_start_ptr += sizeof(InnerGroupPointer) * init_group_num * (1 << level_id);
-        buc_start_ptr += sizeof(Bucket) * bucket_per_group * init_group_num * (1 << level_id);
-        group_cnt += init_group_num * (1 << level_id);
+        group_start_ptr += sizeof(InnerGroupPointer) * init_group_num * (fanout << (fanout_bits * (level_id-1)));
+        buc_start_ptr += sizeof(Bucket) * bucket_per_group * init_group_num * (fanout << (fanout_bits * (level_id-1)));
+        group_cnt += init_group_num * (fanout << (fanout_bits * (level_id-1)));
     }
 
     // 3. write key to bucket in new level
-    Bucket *buc = (Bucket *)alloc.alloc(sizeof(Bucket)*entry_per_group);
+    Bucket *buc = (Bucket *)alloc.alloc(sizeof(Bucket) * entry_per_group);
     for (uint64_t fanout_id = 0; fanout_id < fanout; fanout_id++)
     {
         // log_err("migrate fanout:%lu with size:%lu",fanout_id,sizes[fanout_id]);
@@ -376,17 +385,19 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
         assert(sizes[fanout_id] <= entry_per_group);
 
         // 3.1 Read Inner Group Pointer
-        uint64_t pattern = hash(&keys[fanout_id*entry_per_group], sizeof(uint64_t));
+        uint64_t pattern = hash(&keys[fanout_id * entry_per_group], sizeof(uint64_t));
         uint64_t group_id = pattern % group_size;
         uintptr_t group_ptr = group_start_ptr + group_id * sizeof(InnerGroupPointer);
-        InnerGroupPointer *inner_group = &dir->bottom_levels[group_cnt + group_id];
+        // InnerGroupPointer *inner_group = &dir->bottom_levels[group_cnt + group_id];
+        // 使用临时空间来存放inner_group
+        InnerGroupPointer *inner_group = (InnerGroupPointer *)alloc.alloc(sizeof(InnerGroupPointer));
         co_await conn->read(group_ptr, seg_rmr.rkey, inner_group, sizeof(InnerGroupPointer), lmr->lkey);
 
         if (inner_group->size + sizes[fanout_id] > entry_per_group)
         {
             // 3.2 Migrate group at next level to make room for data from top level
-            // log_err("[%lu:%lu:%lu] Migrate group at level:%lu group:%lu to make room ",this->cli_id,this->coro_id,this->key_num,next_level,group_id);
-            co_await migrate_bot(next_level,group_cnt,group_id,group_ptr,buc_start_ptr);
+            // log_err("[%lu:%lu:%lu] Migrate group at level:%lu group:%lu to make room inner_group->size:%lu sizes[fanout_id]:%lu",this->cli_id,this->coro_id,this->key_num,next_level,group_id,inner_group->size,sizes[fanout_id]);
+            co_await migrate_bot(next_level, inner_group, group_id, group_ptr, buc_start_ptr);
         }
 
         // 3.3 insert entry into free bucket sequentially
@@ -397,7 +408,7 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
             uint64_t first_free_buc_idx = free_buc_idx;
             uint64_t first_buc_size = get_size_of_bucket(inner_group->size, free_buc_idx);
             uintptr_t first_buc_ptr = buc_start_ptr + (group_id * bucket_per_group + free_buc_idx) * sizeof(Bucket);
-            uint64_t buc_cnt = 0 ;
+            uint64_t buc_cnt = 0;
             if (free_buc_idx == -1)
             {
                 log_err("No more free buc during migrate");
@@ -426,7 +437,7 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
                         // log_err("migrate key:%lu to level:%lu group:%lu buc:%lu entry_id:%lu",keys[fanout_id * entry_per_group + elems_inserted + entry_id],next_level,group_id,free_buc_idx,entry_id);
                         uint64_t tmp_hash = hash(keys + fanout_id * entry_per_group + elems_inserted + entry_id, sizeof(uint64_t));
                         inner_group->bucket_pointers[free_buc_idx].filter |= cal_filter(tmp_hash);
-                        buc->entrys[elems_inserted+entry_id] = new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id];
+                        buc->entrys[elems_inserted + entry_id] = new_entrys[fanout_id * entry_per_group + elems_inserted + entry_id];
                         // co_await conn->write(buc_ptr + (bucket_size + entry_id)*sizeof(Entry),seg_rmr.rkey,&buc->entrys[bucket_size + entry_id],sizeof(Entry),lmr->lkey);
                     }
                     elems_inserted += elems_to_insert;
@@ -439,23 +450,23 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
             }
 
             // 3.4 update inner group pointer
-            co_await conn->write(first_buc_ptr+first_buc_size*sizeof(Entry),seg_rmr.rkey,buc->entrys,elems_inserted*sizeof(Entry),lmr->lkey);
-            co_await conn->write(group_ptr + 2 * sizeof(uint64_t) + first_free_buc_idx * sizeof(BucketPointer) , seg_rmr.rkey , &(inner_group->bucket_pointers[first_free_buc_idx]) , buc_cnt*sizeof(BucketPointer) , lmr->lkey );
-            // log_err("");
-            inner_group->size += elems_inserted;
             inner_group->epoch = epoch;
+            co_await conn->write(first_buc_ptr + first_buc_size * sizeof(Entry), seg_rmr.rkey, buc->entrys, elems_inserted * sizeof(Entry), lmr->lkey);
+            co_await conn->write(group_ptr + 2 * sizeof(uint64_t) + first_free_buc_idx * sizeof(BucketPointer), seg_rmr.rkey, &(inner_group->bucket_pointers[first_free_buc_idx]), buc_cnt * sizeof(BucketPointer), lmr->lkey);
+            inner_group->size += elems_inserted;
+            // inner_group->epoch = epoch;
             co_await conn->write(group_ptr, seg_rmr.rkey, inner_group, 2 * sizeof(uint64_t), lmr->lkey);
         }
-        if(elems_inserted != sizes[fanout_id]){
-            log_err("[%lu:%lu:%lu]left unrehashed data with elems_inserted:%lu sizes[:%lu]=%lu ",this->cli_id,this->coro_id,this->key_num,elems_inserted,fanout_id,sizes[fanout_id]);
+        if (elems_inserted != sizes[fanout_id])
+        {
+            log_err("[%lu:%lu:%lu]left unrehashed data with elems_inserted:%lu sizes[:%lu]=%lu ", this->cli_id, this->coro_id, this->key_num, elems_inserted, fanout_id, sizes[fanout_id]);
             exit(-1);
         }
         assert(elems_inserted == sizes[fanout_id]);
+        alloc.free(sizeof(InnerGroupPointer));
     }
     alloc.free(sizeof(Bucket));
 }
-
-
 
 /// @brief 将source_level中group_id上的数据写入到下一层中对应group上
 /// @param source_level 数据所在层次
@@ -463,54 +474,53 @@ task<> Client::bulk_level_insert(uint64_t next_level, uint64_t epoch, const uint
 /// @param group_id 在目标层次中要迁移的group
 /// @param group_ptr 要迁移group的远端指针
 /// @param buc_start_ptr 要迁移group所在level的bucket的起始地址，从bulk_level_insert继承
-/// @return 
-task<> Client::migrate_bot(uint64_t source_level,uint64_t group_cnt,uint64_t group_id,uintptr_t group_ptr,uintptr_t buc_start_ptr){
-    InnerGroupPointer *inner_group = &dir->bottom_levels[group_cnt + group_id];
-    uint64_t group_size = init_group_num * (1 << source_level);
+/// @return
+task<> Client::migrate_bot(uint64_t source_level, InnerGroupPointer *inner_group, uint64_t group_id, uintptr_t group_ptr, uintptr_t buc_start_ptr)
+{
+    uint64_t group_size = init_group_num * (fanout << (fanout_bits * source_level));
     uint64_t keys[bucket_per_group * entry_per_group]; // 每个bucket最多
     Entry entrys[bucket_per_group * entry_per_group];
     uint64_t sizes[bucket_per_group] = {0};
 
-    uint64_t rehashed = 0 ;
+    uint64_t rehashed = 0;
     uint64_t buc_idx = 0;
     int epoch = inner_group->epoch;
 
     // 1. rehash && move entrys
-    Bucket* buc = (Bucket*)alloc.alloc(sizeof(Bucket)*bucket_per_group);
+    Bucket *buc = (Bucket *)alloc.alloc(sizeof(Bucket) * bucket_per_group);
     uintptr_t buc_ptr = buc_start_ptr + group_id * bucket_per_group * sizeof(Bucket);
-    co_await conn->read(buc_ptr,seg_rmr.rkey,buc,sizeof(Bucket)*bucket_per_group,lmr->lkey);
-    while(rehashed < inner_group->size){
-        uint64_t to_rehash = std::min(entry_per_bucket , inner_group->size - rehashed);
-        co_await rehash(buc+buc_idx,to_rehash,source_level,keys,entrys,sizes);
+    co_await conn->read(buc_ptr, seg_rmr.rkey, buc, sizeof(Bucket) * bucket_per_group, lmr->lkey);
+    while (rehashed < inner_group->size)
+    {
+        uint64_t to_rehash = std::min(entry_per_bucket, inner_group->size - rehashed);
+        co_await rehash(buc + buc_idx, to_rehash, source_level, keys, entrys, sizes);
 
         rehashed += to_rehash;
         buc_idx++;
     }
-    co_await bulk_level_insert(source_level+1,epoch,keys,entrys,sizes);
-
+    co_await bulk_level_insert(source_level + 1, epoch, keys, entrys, sizes);
     // 2. zero bloom filter for all buckets at srouce_level - group_id
-    for(uint64_t i = 0 ; i < bucket_per_group ; i++){
-        inner_group->bucket_pointers[i].filter = 0;
-    }
-    co_await conn->write(group_ptr + 2*sizeof(uint64_t),seg_rmr.rkey,inner_group->bucket_pointers,sizeof(BucketPointer)*bucket_per_group,lmr->lkey);
-    
-    inner_group->size = 0 ;
-    co_await conn->write(group_ptr ,seg_rmr.rkey,&inner_group->size,sizeof(uint64_t),lmr->lkey);
-
-    alloc.free(sizeof(Bucket)*bucket_per_group);
+    memset(inner_group->bucket_pointers, 0, sizeof(__uint128_t) * bucket_per_group);
+    // for(uint64_t i = 0 ; i < bucket_per_group ; i++){
+    //     inner_group->bucket_pointers[i].filter = 0;
+    // }
+    co_await conn->write(group_ptr + 2 * sizeof(uint64_t), seg_rmr.rkey, inner_group->bucket_pointers, sizeof(BucketPointer) * bucket_per_group, lmr->lkey);
+    inner_group->size = 0;
+    co_await conn->write(group_ptr, seg_rmr.rkey, &inner_group->size, sizeof(uint64_t), lmr->lkey);
+    alloc.free(sizeof(Bucket) * bucket_per_group);
 }
-
 
 task<bool> Client::search(Slice *key, Slice *value)
 {
     uint64_t pattern = hash(key->data, key->len);
     uint64_t tmp_fp = fp(pattern);
     this->key_num = *(uint64_t *)key->data;
+    uint64_t local_dir_size = sizeof(uint64_t) + sizeof(TopPointer) * init_group_num + sizeof(InnerGroupPointer) * init_group_num * fanout;
 Retry:
-    alloc.ReSet(sizeof(Directory));
+    alloc.ReSet(local_dir_size);
     KVBlock *res = nullptr;
     KVBlock *kv_block = (KVBlock *)alloc.alloc(7 * ALIGNED_SIZE);
-    Bucket* buc = (Bucket*)alloc.alloc(sizeof(Bucket));
+    Bucket *buc = (Bucket *)alloc.alloc(sizeof(Bucket));
 
     // 1. Cal GroupIdx && BucIdx
     uint64_t group_id = pattern % init_group_num;
@@ -523,15 +533,19 @@ Retry:
     // log_err("[%lu:%lu:%lu]find at level:0 group:%lu",this->cli_id,this->coro_id,this->key_num,group_id);
 
     // 3. search in top
-    uintptr_t buc_ptr = seg_rmr.raddr + sizeof(Directory) + (group_id*bucket_per_group +buc_id)*sizeof(Bucket);
-    co_await conn->read(buc_ptr,seg_rmr.rkey,buc,sizeof(Bucket),lmr->lkey);
-    for(int i = dir->first_level[group_id].size[buc_id]-1 ; i >= 0 ;i--){
-        if(buc->entrys[i].fp == tmp_fp){
+    uintptr_t buc_ptr = seg_rmr.raddr + sizeof(Directory) + (group_id * bucket_per_group + buc_id) * sizeof(Bucket);
+    co_await conn->read(buc_ptr, seg_rmr.rkey, buc, sizeof(Bucket), lmr->lkey);
+    for (int i = dir->first_level[group_id].size[buc_id] - 1; i >= 0; i--)
+    {
+        if (buc->entrys[i].fp == tmp_fp)
+        {
             // buc->entrys[i].print();
             co_await conn->read(ralloc.ptr(buc->entrys[i].offset), seg_rmr.rkey, kv_block, (buc->entrys[i].len) * ALIGNED_SIZE, lmr->lkey);
-            if (memcmp(key->data, kv_block->data, key->len) == 0){
+            if (memcmp(key->data, kv_block->data, key->len) == 0)
+            {
                 co_await conn->read(group_ptr, seg_rmr.rkey, &(dir->first_level[group_id]), sizeof(TopPointer), lmr->lkey);
-                if(dir->first_level[group_id].epoch == epoch){
+                if (dir->first_level[group_id].epoch == epoch)
+                {
                     res = kv_block;
                     break;
                 }
@@ -541,40 +555,49 @@ Retry:
     }
 
     // 4. search in bot
-    if(res == nullptr){
-        uint64_t level = 1 ;
+    if (res == nullptr)
+    {
+        uint64_t level = 1;
         __uint128_t filter = cal_filter(pattern);
-        uintptr_t group_start_ptr = seg_rmr.raddr + sizeof(uint64_t) + sizeof(TopPointer) * init_group_num ;
-        uintptr_t buc_start_ptr = seg_rmr.raddr + sizeof(Directory) + sizeof(Bucket)*init_group_num*bucket_per_group;
-        uint64_t group_cnt = 0 ;
-        co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,&dir->cur_level,sizeof(uint64_t),lmr->lkey);
-        while(level <= dir->cur_level){
-            uint64_t group_size = init_group_num * (1<<level);
+        uintptr_t group_start_ptr = seg_rmr.raddr + sizeof(uint64_t) + sizeof(TopPointer) * init_group_num;
+        uintptr_t buc_start_ptr = seg_rmr.raddr + sizeof(Directory) + sizeof(Bucket) * init_group_num * bucket_per_group;
+        uint64_t group_cnt = 0;
+        co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, &dir->cur_level, sizeof(uint64_t), lmr->lkey);
+        while (level <= dir->cur_level)
+        {
+            uint64_t group_size = init_group_num * (fanout << (fanout_bits * (level-1)));
             group_id = pattern % group_size;
-            uintptr_t group_ptr = group_start_ptr + group_id*sizeof(InnerGroupPointer);
-            InnerGroupPointer* inner_group = &(dir->bottom_levels[group_cnt+group_id]);
-BotRetry:
-            co_await conn->read(group_ptr,seg_rmr.rkey,inner_group,sizeof(InnerGroupPointer),lmr->lkey); 
+            uintptr_t group_ptr = group_start_ptr + group_id * sizeof(InnerGroupPointer);
+            InnerGroupPointer *inner_group = &(dir->bottom_levels[0]);
+        BotRetry:
+            co_await conn->read(group_ptr, seg_rmr.rkey, inner_group, sizeof(InnerGroupPointer), lmr->lkey);
             // log_err("[%lu:%lu:%lu]find at level:%lu group:%lu",this->cli_id,this->coro_id,this->key_num,level,group_id);
-            for(int i= bucket_per_group - 1 ; i >= 0 ; --i){
-                buc_ptr = buc_start_ptr + (group_id * bucket_per_group + i ) * sizeof(Bucket);
-                if(((!inner_group->bucket_pointers[i].filter) & filter) == 0){
-                    co_await conn->read(buc_ptr,seg_rmr.rkey,buc,sizeof(Bucket),lmr->lkey);
+            for (int i = bucket_per_group - 1; i >= 0; --i)
+            {
+                buc_ptr = buc_start_ptr + (group_id * bucket_per_group + i) * sizeof(Bucket);
+                if (((!inner_group->bucket_pointers[i].filter) & filter) == 0)
+                {
+                    co_await conn->read(buc_ptr, seg_rmr.rkey, buc, sizeof(Bucket), lmr->lkey);
                     uint64_t epoch = inner_group->epoch;
                     uint64_t size = inner_group->size;
 
-                    uint64_t buc_size = get_size_of_bucket(size,i);
-                    for(int entry_id = buc_size ; entry_id>=0 ; entry_id--){
-                        if(buc->entrys[entry_id].fp == tmp_fp){
+                    uint64_t buc_size = get_size_of_bucket(size, i);
+                    for (int entry_id = buc_size; entry_id >= 0; entry_id--)
+                    {
+                        if (buc->entrys[entry_id].fp == tmp_fp)
+                        {
                             // buc->entrys[i].print();
                             co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, kv_block, (buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);
                             if (memcmp(key->data, kv_block->data, key->len) == 0)
                             {
-                                co_await conn->read(group_ptr,seg_rmr.rkey,inner_group,sizeof(InnerGroupPointer),lmr->lkey);
-                                if(inner_group->epoch == epoch){
+                                co_await conn->read(group_ptr, seg_rmr.rkey, inner_group, sizeof(InnerGroupPointer), lmr->lkey);
+                                if (inner_group->epoch == epoch)
+                                {
                                     res = kv_block;
                                     break;
-                                }else{
+                                }
+                                else
+                                {
                                     goto BotRetry;
                                 }
                             }
@@ -583,14 +606,13 @@ BotRetry:
                 }
             }
 
-            co_await conn->read(seg_rmr.raddr,seg_rmr.rkey,&dir->cur_level,sizeof(uint64_t),lmr->lkey);
+            co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, &dir->cur_level, sizeof(uint64_t), lmr->lkey);
             ++level;
             group_cnt += group_size;
             group_start_ptr += sizeof(InnerGroupPointer) * group_size;
             buc_start_ptr += sizeof(Bucket) * bucket_per_group * group_size;
         }
     }
-    
 
     if (res != nullptr && res->v_len != 0)
     {
@@ -606,7 +628,7 @@ BotRetry:
 
 task<> Client::update(Slice *key, Slice *value)
 {
-    co_await this->insert(key,value);
+    co_await this->insert(key, value);
     co_return;
 }
 task<> Client::remove(Slice *key)

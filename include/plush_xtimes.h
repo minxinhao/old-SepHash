@@ -13,8 +13,9 @@
 #include <math.h>
 #include <tuple>
 #include <vector>
+#include <cmath>
 
-namespace Plush
+namespace Plush_XTIMES
 {
 
 // Plush代码中使用了ENTRY_IDX + BUCKET_IDX的配置，实际上就是增大了初始HashTable大小；
@@ -34,11 +35,13 @@ constexpr uint64_t entry_per_bucket = 16;
 // number of entry in every group
 constexpr uint64_t entry_per_group = entry_per_bucket * bucket_per_group;
 // 固定fanout为2，论文也说的2，不知道为啥代码里面用的16
-constexpr uint64_t fanout = 2;
+constexpr uint64_t fanout_bits = 4;
+constexpr uint64_t fanout = (1<<fanout_bits);
 
 // constexpr uint64_t max_level = 16;
-constexpr uint64_t max_level = 12;
-constexpr uint64_t max_group_size = (1<<max_level)*init_group_num;
+constexpr uint64_t max_level_base_fanout_2 = 16;
+constexpr uint64_t max_level = (max_level_base_fanout_2/(fanout/2));
+constexpr uint64_t max_group_size = (fanout<<(fanout_bits*(max_level+1)))*init_group_num;
 // (total_key_num) / (entry_per_bucket * bucket_per_group) = (11000000)/(16*16) = 43000
 // constexpr uint64_t max_group_size = 43000;
 
@@ -153,7 +156,7 @@ public:
 private:
     // 用来在Resize的时候Move数据
     task<> migrate_top(uint64_t group_id);
-    task<> migrate_bot(uint64_t source_level,uint64_t group_cnt,uint64_t group_id,uintptr_t group_ptr,uintptr_t buc_start_ptr);
+    task<> migrate_bot(uint64_t source_level,InnerGroupPointer* inner_group,uint64_t group_id,uintptr_t group_ptr,uintptr_t buc_start_ptr);
     task<> rehash(Bucket *bucket, uint64_t size, uint64_t level, uint64_t* keys, Entry *new_entrys, uint64_t *sizes);
     task<> bulk_level_insert(uint64_t level, uint64_t epoch, const uint64_t *keys,Entry *new_entrys, const uint64_t *sizes);
     
