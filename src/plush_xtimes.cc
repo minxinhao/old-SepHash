@@ -537,7 +537,7 @@ Retry:
     co_await conn->read(buc_ptr, seg_rmr.rkey, buc, sizeof(Bucket), lmr->lkey);
     for (int i = dir->first_level[group_id].size[buc_id] - 1; i >= 0; i--)
     {
-        if (buc->entrys[i].fp == tmp_fp)
+        if (buc->entrys[i].fp == tmp_fp && buc->entrys[i].offset != 0)
         {
             // buc->entrys[i].print();
             co_await conn->read(ralloc.ptr(buc->entrys[i].offset), seg_rmr.rkey, kv_block, (buc->entrys[i].len) * ALIGNED_SIZE, lmr->lkey);
@@ -584,7 +584,7 @@ Retry:
                     uint64_t buc_size = get_size_of_bucket(size, i);
                     for (int entry_id = buc_size; entry_id >= 0; entry_id--)
                     {
-                        if (buc->entrys[entry_id].fp == tmp_fp)
+                        if (buc->entrys[entry_id].fp == tmp_fp && buc->entrys[entry_id].offset != 0)
                         {
                             // buc->entrys[i].print();
                             co_await conn->read(ralloc.ptr(buc->entrys[entry_id].offset), seg_rmr.rkey, kv_block, (buc->entrys[entry_id].len) * ALIGNED_SIZE, lmr->lkey);

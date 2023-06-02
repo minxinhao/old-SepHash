@@ -21,9 +21,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = Plush_XTIMES::Client;
-using ServerType = Plush_XTIMES::Server;
-using Slice = Plush_XTIMES::Slice;
+using ClientType = CLEVEL::Client;
+using ServerType = CLEVEL::Server;
+using Slice = CLEVEL::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {

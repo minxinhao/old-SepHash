@@ -254,7 +254,7 @@ Retry:
                     if (memcmp(key->data, tmp_block->data, key->len) == 0)
                     {
                         // duplicate key : delete
-                        log_err("[%lu:%lu:%lu]duplicate",this->cli_id,this->coro_id,this->key_num);
+                        // log_err("[%lu:%lu:%lu]duplicate",this->cli_id,this->coro_id,this->key_num);
                         uintptr_t slot_ptr = buc_ptr + sizeof(Entry) * entry_id;
                         co_await conn->cas_n(slot_ptr, seg_rmr.rkey,buc->entrys[entry_id], 0);
                     }
@@ -598,7 +598,7 @@ Retry:
 
 task<> Client::update(Slice *key, Slice *value)
 {
-    co_await insert(key,value);
+    co_await this->insert(key,value);
     co_return;
 }
 task<> Client::remove(Slice *key)
