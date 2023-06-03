@@ -140,7 +140,7 @@ task<> Client::cal_utilization(){
         uint64_t first_index = i & ((1<<dir->segs[i].local_depth)-1);
         first_index |= 1<<dir->segs[i].local_depth ;
         if(dir->segs[i].local_depth == dir->global_depth || i == first_index ){
-            space_consumption += sizeof(CurSeg)-10*sizeof(uint64_t);
+            space_consumption += sizeof(CurSeg);
             entry_total += SLOT_PER_SEG;
             segment_cnt++;
             
@@ -149,7 +149,7 @@ task<> Client::cal_utilization(){
             space_consumption += cur_seg->seg_meta.main_seg_len * sizeof(Slot);
             entry_total += cur_seg->seg_meta.main_seg_len;
             entry_cnt += cur_seg->seg_meta.main_seg_len;
-            
+
             // cal cur segment
             for(uint64_t i = 0 ; i < SLOT_PER_SEG ; i++){
                 if(cur_seg->slots[i].sign != cur_seg->seg_meta.sign ){

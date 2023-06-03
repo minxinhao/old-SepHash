@@ -168,7 +168,42 @@ task<> Client::stop()
 
 task<> Client::cal_utilization(){
     if(this->machine_id !=0 || this->cli_id != 0 || this->coro_id != 0) co_return;
+    uint64_t space_consumption = 3*sizeof(uint64_t);
+    uint64_t segment_cnt = 0 ;
+    uint64_t entry_total = 0 ;
+    uint64_t entry_cnt = 0 ;
 
+    // 1. Read Header
+    co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir, sizeof(Directory), lmr->lkey);    
+
+    // 2. 遍历level
+    uintptr_t cur_table_ptr = dir->last_level;
+    LevelTable* cur_table = (LevelTable*) alloc.alloc(sizeof(LevelTable));
+    Bucket* buc = (Bucket*)alloc.alloc(sizeof(Bucket)*zero_size);  // 不知道为啥这里0长数组失效了，只能手动分配空间
+    uint64_t level_id = 0;
+    while(cur_table_ptr != 0){
+        // 2.1 Read LevelTable Header : capacity,up
+        co_await conn->read(cur_table_ptr,seg_rmr.rkey,cur_table,sizeof(LevelTable),lmr->lkey);
+        space_consumption += 2*sizeof(uint64_t) + cur_table->capacity*BUCKET_SIZE*sizeof(Entry);
+        entry_total += cur_table->capacity*BUCKET_SIZE;
+        log_err("level:%lu capacity:%lu",level_id,cur_table->capacity);
+        for(uint64_t i = 0 ; i < cur_table->capacity ; i+=zero_size){
+            co_await conn->read(cur_table_ptr + i * sizeof(Bucket),seg_rmr.rkey,buc,zero_size * sizeof(Bucket),lmr->lkey);
+            for(uint64_t buc_id  = 0 ; buc_id < zero_size ; buc_id++){
+                for(uint64_t slot_id = 0 ; slot_id < BUCKET_SIZE ; slot_id++){
+                    if(cur_table->buckets[buc_id].entrys[slot_id].offset != 0){
+                        entry_cnt++;
+                    }
+                }
+            }
+        }
+        cur_table_ptr = cur_table->up;
+        level_id++;
+    }
+    double space_utilization = (1.0*entry_cnt*sizeof(Entry))/(1.0*space_consumption);
+    space_consumption = space_consumption>>20;
+    double entry_utilization = (1.0*entry_cnt)/(1.0*entry_total);
+    log_err("space_consumption:%luMB segment_cnt:%lu entry_total:%lu entry_cnt:%lu entry_utilization:%lf space_utilization:%lf",space_consumption,segment_cnt,entry_total,entry_cnt,entry_utilization,space_utilization);
 }
 
 
