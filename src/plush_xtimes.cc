@@ -191,6 +191,61 @@ task<> Client::stop()
     }
 }
 
+task<> Client::cal_utilization(){
+    if(this->machine_id !=0 || this->cli_id != 0 || this->coro_id != 0) co_return;
+    uint64_t space_consumption = sizeof(uint64_t);
+    uint64_t entry_total = 0 ;
+    uint64_t entry_cnt = 0 ;
+
+    // 1. Read Header
+    uint64_t local_dir_size = sizeof(uint64_t) + sizeof(TopPointer) * init_group_num;
+    co_await conn->read(seg_rmr.raddr, seg_rmr.rkey, dir,local_dir_size, lmr->lkey); 
+
+    // 2. 遍历第一层
+    space_consumption += init_group_num * sizeof(TopPointer);
+    space_consumption += init_group_num * bucket_per_group * sizeof(Bucket);
+    entry_total += init_group_num * bucket_per_group * entry_per_bucket;
+    for(uint64_t i = 0 ; i < init_group_num ; i++){
+        for(uint64_t buc_id = 0 ; buc_id < bucket_per_group ; buc_id++){
+            // log_err("first_level: group:%lu buc:%lu size:%lu",i,buc_id,dir->first_level[i].size[buc_id]);
+            entry_cnt += dir->first_level[i].size[buc_id];
+        }
+    }
+
+    // 3. 遍历后续层次
+    uint64_t base_level_size = sizeof(InnerGroupPointer) * init_group_num ;
+    uint64_t level_id = 1;
+    uintptr_t header_ptr = seg_rmr.raddr + local_dir_size;
+    while(level_id <= dir->cur_level){
+        uint64_t level_fanout = fanout<<(fanout_bits*(level_id-1));
+        space_consumption += level_fanout * base_level_size ;
+        // 按照base_level_size为单位遍历当前level
+        for(uint64_t i = 0 ; i < (level_fanout/fanout) ; i++){
+            co_await conn->read(header_ptr, seg_rmr.rkey, dir->bottom_levels,fanout*base_level_size, lmr->lkey); 
+            // 每个inner group直接增加size大小的entry_cnt
+            for(uint64_t group_id = 0 ; group_id < init_group_num*fanout ; group_id++){
+                entry_cnt += dir->bottom_levels[group_id].size;
+                for(uint64_t buc_id = 0 ; buc_id < bucket_per_group ; buc_id++){
+                    if(dir->bottom_levels[group_id].bucket_pointers[buc_id].buc_ptr != 0 ){
+                        // log_err("level_fanout:%lu level:%lu batch:%lu group:%lu size:%lu",level_fanout,level_id,i,group_id,dir->bottom_levels[group_id].size);
+                        entry_total += bucket_per_group; 
+                        space_consumption += sizeof(Bucket);
+                    }
+                    
+                }
+            }
+            header_ptr += fanout*base_level_size;
+        }
+        level_id++;
+    }
+
+    double space_utilization = (1.0*entry_cnt*sizeof(Entry))/(1.0*space_consumption);
+    space_consumption = space_consumption>>20;
+    double entry_utilization = (1.0*entry_cnt)/(1.0*entry_total);
+    log_err("space_consumption:%luMB entry_total:%lu entry_cnt:%lu entry_utilization:%lf space_utilization:%lf",space_consumption,entry_total,entry_cnt,entry_utilization,space_utilization);
+}
+
+
 task<> Client::insert(Slice *key, Slice *value)
 {
     op_cnt++;

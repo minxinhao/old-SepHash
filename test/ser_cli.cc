@@ -21,9 +21,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = CLEVEL::Client;
-using ServerType = CLEVEL::Server;
-using Slice = CLEVEL::Slice;
+using ClientType = RACE::Client;
+using ServerType = RACE::Server;
+using Slice = RACE::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
