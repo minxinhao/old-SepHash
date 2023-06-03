@@ -21,9 +21,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = CLEVEL::Client;
-using ServerType = CLEVEL::Server;
-using Slice = CLEVEL::Slice;
+using ClientType = SPLIT_OP2C::Client;
+using ServerType = SPLIT_OP2C::Server;
+using Slice = SPLIT_OP2C::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -309,6 +309,10 @@ int main(int argc, char *argv[])
             };
             ths[config.num_cli] = std::thread(th,rdma_clis[config.num_cli]);
             ths[config.num_cli].join();
+        }
+
+        if(config.machine_id==0){
+            rdma_clis[0]->run(((ClientType*)clis[0])->cal_utilization());
         }
 
         for (auto gen : gens)

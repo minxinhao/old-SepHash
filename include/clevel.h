@@ -127,6 +127,7 @@ public:
     task<> start(uint64_t total);
     task<> stop();
     task<> reset_remote();
+    task<> cal_utilization();
 
     task<> insert(Slice *key, Slice *value);
     task<bool> search(Slice *key, Slice *value);

@@ -166,6 +166,12 @@ task<> Client::stop()
     }
 }
 
+task<> Client::cal_utilization(){
+    if(this->machine_id !=0 || this->cli_id != 0 || this->coro_id != 0) co_return;
+
+}
+
+
 task<> Client::insert(Slice *key, Slice *value)
 {
     op_cnt++;

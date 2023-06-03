@@ -125,6 +125,46 @@ Client::~Client()
     // log_err("[%lu:%lu] miss_cnt:%lu", cli_id, coro_id, miss_cnt);
 }
 
+task<> Client::cal_utilization(){
+    if(this->machine_id !=0 || this->cli_id != 0 || this->coro_id != 0) co_return;
+    co_await sync_dir();
+    uint64_t space_consumption = sizeof(uint64_t)+(1<<dir->global_depth)*sizeof(DirEntry);
+    uint64_t segment_cnt = 0 ;
+    uint64_t entry_total = 0 ;
+    uint64_t entry_cnt = 0 ;
+
+    // 遍历Segment，统计空间开销和空间利用率
+    log_err("global_dep:%lu",dir->global_depth);
+    CurSeg * cur_seg = (CurSeg*)alloc.alloc(sizeof(CurSeg));
+    for(uint64_t i = 0 ; i < (1<<dir->global_depth) ; i++){
+        uint64_t first_index = i & ((1<<dir->segs[i].local_depth)-1);
+        first_index |= 1<<dir->segs[i].local_depth ;
+        if(dir->segs[i].local_depth == dir->global_depth || i == first_index ){
+            space_consumption += sizeof(CurSeg)-10*sizeof(uint64_t);
+            entry_total += SLOT_PER_SEG;
+            segment_cnt++;
+            
+            // add main segment
+            co_await conn->read(dir->segs[i].cur_seg_ptr,seg_rmr.rkey,cur_seg,sizeof(CurSeg),lmr->lkey);
+            space_consumption += cur_seg->seg_meta.main_seg_len * sizeof(Slot);
+            entry_total += cur_seg->seg_meta.main_seg_len;
+            entry_cnt += cur_seg->seg_meta.main_seg_len;
+            
+            // cal cur segment
+            for(uint64_t i = 0 ; i < SLOT_PER_SEG ; i++){
+                if(cur_seg->slots[i].sign != cur_seg->seg_meta.sign ){
+                    entry_cnt++;
+                }
+            }
+        }
+    }
+    double space_utilization = (1.0*entry_cnt*sizeof(Slot))/(1.0*space_consumption);
+    space_consumption = space_consumption>>20;
+    double entry_utilization = (1.0*entry_cnt)/(1.0*entry_total);
+    log_err("space_consumption:%luMB segment_cnt:%lu entry_total:%lu entry_cnt:%lu entry_utilization:%lf space_utilization:%lf",space_consumption,segment_cnt,entry_total,entry_cnt,entry_utilization,space_utilization);
+}
+
+
 task<> Client::reset_remote()
 {
     // 模拟远端分配器信息
