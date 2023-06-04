@@ -15,12 +15,12 @@ else
 
     for read_size in `seq 6 6`;do
         echo "read_size" $((1<<$read_size))
-        for num_cli in `seq 0 0`;do
+        for num_cli in `seq 0 4`;do
             for num_coro in `seq 1 1`;do
             # for num_coro in 1 2 4;do
-                for ((load_num=235000;load_num<=266000;load_num+=1000)); do
-=                # for load_num in 1000 10000 100000 1000000 10000000 ;do
-                # for load_num in 10000000;do
+                # for ((load_num=235000;load_num<=266000;load_num+=1000)); do
+                # for load_num in 1000 10000 100000 1000000 10000000 ;do
+                for load_num in 10000000;do
                     echo "num_cli" $((1<<$num_cli)) "num_coro" $num_coro "load_num" $load_num
                     ./ser_cli \
                     --server_ip 192.168.1.52 --num_machine 1 --num_cli $((1<<$num_cli)) --num_coro $num_coro \
