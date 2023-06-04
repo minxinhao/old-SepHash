@@ -261,7 +261,8 @@ task<> Client::insert(Slice *key, Slice *value)
     uint64_t kvblock_len = key->len + value->len + sizeof(uint64_t) * 3;
     uint64_t kvblock_ptr = ralloc.alloc(kvblock_len);
     // a. writekv
-    co_await conn->write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey);
+    // co_await conn->write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey);
+    wo_wait_conn->pure_write(kvblock_ptr, seg_rmr.rkey, kv_block, kvblock_len, lmr->lkey);
     retry_cnt = 0;
     this->key_num = *(uint64_t *)key->data;
 Retry:
@@ -597,7 +598,8 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
         new_cur_seg->seg_meta.sign = 1;
         new_cur_seg->seg_meta.main_seg_ptr = new_main_ptr2;
         new_cur_seg->seg_meta.main_seg_len = off2;
-        co_await conn->write(new_cur_seg->seg_meta.main_seg_ptr, seg_rmr.rkey, new_seg_2, sizeof(Slot) * off2, lmr->lkey);
+        // co_await conn->write(new_cur_seg->seg_meta.main_seg_ptr, seg_rmr.rkey, new_seg_2, sizeof(Slot) * off2, lmr->lkey);
+        wo_wait_conn->pure_write(new_cur_seg->seg_meta.main_seg_ptr, seg_rmr.rkey, new_seg_2, sizeof(Slot) * off2, lmr->lkey);
         co_await conn->write(new_cur_ptr, seg_rmr.rkey, new_cur_seg, sizeof(CurSeg), lmr->lkey);
         // b. new main_seg for old
         cur_seg->seg_meta.main_seg_ptr = new_main_ptr1;
@@ -605,7 +607,8 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
         cur_seg->seg_meta.local_depth = local_depth + 1;
         // cur_seg->seg_meta.sign = !cur_seg->seg_meta.sign; // 对old cur_seg的清空放到最后?保证同步。
         memset(cur_seg->seg_meta.fp_bitmap, 0, sizeof(uint64_t) * 16);
-        co_await conn->write(cur_seg->seg_meta.main_seg_ptr, seg_rmr.rkey, new_seg_1, sizeof(Slot) * off1, lmr->lkey);
+        // co_await conn->write(cur_seg->seg_meta.main_seg_ptr, seg_rmr.rkey, new_seg_1, sizeof(Slot) * off1, lmr->lkey);
+        wo_wait_conn->pure_write(cur_seg->seg_meta.main_seg_ptr, seg_rmr.rkey, new_seg_1, sizeof(Slot) * off1, lmr->lkey);
         co_await conn->write(seg_ptr + sizeof(uint64_t), seg_rmr.rkey, ((uint64_t *)cur_seg) + 1, sizeof(CurSegMeta),lmr->lkey);
 
 
@@ -620,8 +623,8 @@ task<> Client::Split(uint64_t seg_loc, uintptr_t seg_ptr, CurSegMeta *old_seg_me
     // a. write main segment
     uintptr_t new_main_ptr = ralloc.alloc(main_seg_size + sizeof(Slot) * SLOT_PER_SEG, true);
     uint64_t new_main_len = dir->segs[seg_loc].main_seg_len + SLOT_PER_SEG;
-    co_await conn->write(new_main_ptr, seg_rmr.rkey, new_main_seg->slots,
-                                sizeof(Slot) * new_main_len, lmr->lkey);
+    // co_await conn->write(new_main_ptr, seg_rmr.rkey, new_main_seg->slots,sizeof(Slot) * new_main_len, lmr->lkey);
+    wo_wait_conn->pure_write(new_main_ptr, seg_rmr.rkey, new_main_seg->slots,sizeof(Slot) * new_main_len, lmr->lkey);
     // b. Update MainSegPtr/Len and fp_bitmap
     cur_seg->seg_meta.main_seg_ptr = new_main_ptr;
     cur_seg->seg_meta.main_seg_len = main_seg_size / sizeof(Slot) + SLOT_PER_SEG;
