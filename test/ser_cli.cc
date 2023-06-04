@@ -12,6 +12,7 @@
 #include "split_op2b.h"
 #include "split_op2c.h"
 #include "split_batch.h"
+#include "split_inline_dep.h"
 #include "race_wo_op.h"
 #include "rdma_bench.h"
 #include "cluster_hash.h"
@@ -23,9 +24,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = RACE_WO_OP::Client;
-using ServerType = RACE_WO_OP::Server;
-using Slice = RACE_WO_OP::Slice;
+using ClientType = SPLIT_INLINE_DEP::Client;
+using ServerType = SPLIT_INLINE_DEP::Server;
+using Slice = SPLIT_INLINE_DEP::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
