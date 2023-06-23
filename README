@@ -20,3 +20,5 @@ make ser_cli
 
 # 收集数据 in build directory 
 ../sync.sh in
+# python3 ../collect.py #num_clients
+python3 ../collect.py 2/4/8

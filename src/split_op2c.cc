@@ -802,8 +802,8 @@ Retry:
     // 5.2 Find In CurSeg
     // 在CurSeg中，相同FP的Slot，更新的Slot会被写入在更靠后的位置
     // co_await std::move(read_bit_map);
-    // if ((seg_meta->fp_bitmap[bit_loc] & bit_info) == bit_info || res==nullptr)
-    if (res==nullptr)
+    if ((seg_meta->fp_bitmap[bit_loc] & bit_info) == bit_info)
+    // if (res==nullptr)
     {
         Slot* curseg_slots = (Slot *)alloc.alloc(sizeof(Slot) * SLOT_PER_SEG);
         co_await conn->read(cur_seg_ptr + sizeof(uint64_t) + sizeof(CurSegMeta), seg_rmr.rkey, curseg_slots, sizeof(Slot) * SLOT_PER_SEG, lmr->lkey);

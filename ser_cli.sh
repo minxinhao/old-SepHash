@@ -29,7 +29,7 @@ else
                     --machine_id $1  \
                     --load_num $load_num \
                     --num_op 1000000 \
-                    --pattern_type 0 \
+                    --pattern_type 2 \
                     --insert_frac 0.0 \
                     --read_frac   1.0 \
                     --update_frac  0.0 \
