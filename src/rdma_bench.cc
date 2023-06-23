@@ -103,6 +103,10 @@ task<> Client::insert(Slice *key, Slice *value)
     co_await conn->write(ptr, seg_rmr.rkey, alloc.start + (this->key_num % 1000) * op_size, op_size, lmr->lkey);
 }
 
+task<> Client::cal_utilization(){
+    co_return;
+}
+
 task<bool> Client::search(Slice *key, Slice *value)
 {
     uint64_t op_size = read_size; // 64 bytes

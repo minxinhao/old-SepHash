@@ -31,11 +31,11 @@ for input_file in input_files:
         else:
             results[key] += float(load_iops_matches[i])
 
-        # key = 'Run IOPS ' + str(i+1)
-        # if key not in results:
-        #     results[key] = float(run_iops_matches[i])
-        # else:
-        #     results[key] += float(run_iops_matches[i])
+        key = 'Run IOPS ' + str(i+1)
+        if key not in results:
+            results[key] = float(run_iops_matches[i])
+        else:
+            results[key] += float(run_iops_matches[i])
 
 # 将所有输入文件的结果写入CSV文件
 with open('output.csv', 'w', newline='') as f:
@@ -44,6 +44,6 @@ with open('output.csv', 'w', newline='') as f:
     for key in results:
         if key.startswith('Load IOPS'):
             writer.writerow([key, results[key]])
-    # for key in results:
-    #     if key.startswith('Run IOPS'):
-    #         writer.writerow([key, results[key]])
+    for key in results:
+        if key.startswith('Run IOPS'):
+            writer.writerow([key, results[key]])

@@ -14,6 +14,7 @@
 #include "split_batch.h"
 #include "split_inline_dep.h"
 #include "split_search_base.h"
+#include "split_search_fptable.h"
 #include "race_wo_op.h"
 #include "rdma_bench.h"
 #include "cluster_hash.h"
@@ -25,9 +26,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = SPLIT_SEARCH_BASE::Client;
-using ServerType = SPLIT_SEARCH_BASE::Server;
-using Slice = SPLIT_SEARCH_BASE::Slice;
+using ClientType = SPLIT_OP2C::Client;
+using ServerType = SPLIT_OP2C::Server;
+using Slice = SPLIT_OP2C::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
@@ -166,7 +167,7 @@ int main(int argc, char *argv[])
     }
     else
     {
-        uint64_t cbuf_size = (1ul << 20) * 400;
+        uint64_t cbuf_size = (1ul << 20) * 100;
         char *mem_buf = (char *)malloc(cbuf_size * (config.num_cli * config.num_coro + 1));
         rdma_dev dev("mlx5_0", 1, config.roce_flag);
         std::vector<ibv_mr *> lmrs(config.num_cli * config.num_coro + 1, nullptr);
