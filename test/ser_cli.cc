@@ -11,6 +11,7 @@
 #include "split_op2a.h"
 #include "split_op2b.h"
 #include "split_op2c.h"
+#include "sephash.h"
 #include "split_batch.h"
 #include "split_inline_dep.h"
 #include "split_search_base.h"
@@ -26,9 +27,9 @@
 #define ORDERED_INSERT
 Config config;
 uint64_t load_num = 10000000;
-using ClientType = SPLIT_OP2C::Client;
-using ServerType = SPLIT_OP2C::Server;
-using Slice = SPLIT_OP2C::Slice;
+using ClientType = SEPHASH::Client;
+using ServerType = SEPHASH::Server;
+using Slice = SEPHASH::Slice;
 
 inline uint64_t GenKey(uint64_t key)
 {
