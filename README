@@ -22,3 +22,6 @@ make ser_cli
 ../sync.sh in
 # python3 ../collect.py #num_clients
 python3 ../collect.py 2/4/8
+
+# New version
+https://github.com/minxinhao/SepHash-M
